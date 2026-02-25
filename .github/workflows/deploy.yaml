@@ -1,0 +1,48 @@
+name: Deploy FastAPI and Batch Image
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  id-token: write   # Required for OIDC
+  contents: read    # Required to checkout code
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: eu-west-1
+
+      - name: Verify Identity
+        run: aws sts get-caller-identity
+
+    #   # --- PART 1: BUILD & PUSH DOCKER IMAGE ---
+    #   - name: Login to Amazon ECR
+    #     id: login-ecr
+    #     uses: aws-actions/amazon-ecr-login@v2
+
+    #   - name: Build, Tag, and Push Image to ECR
+    #     env:
+    #       ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+    #       ECR_REPOSITORY: my-batch-image-repo
+    #       IMAGE_TAG: latest # Or ${{ github.sha }} if using Immutable tags
+    #     run: |
+    #       # Here is where you'd run your script to convert Notebook -> Dockerfile
+    #       docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+    #       docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+    #   # --- PART 2: SYNC FASTAPI TO LAMBDA ---
+    #   - name: Zip and Deploy Lambda
+    #     run: |
+    #       # Here is where you'd run your script to convert Notebook -> app.py
+    #       zip function.zip app.py 
+    #       aws lambda update-function-code \
+    #         --function-name my-fastapi-lambda \
+    #         --zip-file fileb://function.zip
