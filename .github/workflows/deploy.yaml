@@ -11,16 +11,19 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
+      # Read the code from the repository
+      - name: Checkout Code  
         uses: actions/checkout@v4
 
-      - name: Configure AWS Credentials
+      # Use OIDC to get AWS credentials
+      - name: Configure AWS Credentials  
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: eu-west-1
-
-      - name: Verify Identity
+      
+      # Just to confirm the OIDC setup is working
+      - name: Verify Identity  
         run: aws sts get-caller-identity
 
     #   # --- PART 1: BUILD & PUSH DOCKER IMAGE ---
@@ -38,11 +41,12 @@ jobs:
     #       docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
     #       docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
-    #   # --- PART 2: SYNC FASTAPI TO LAMBDA ---
-    #   - name: Zip and Deploy Lambda
-    #     run: |
-    #       # Here is where you'd run your script to convert Notebook -> app.py
-    #       zip function.zip app.py 
-    #       aws lambda update-function-code \
-    #         --function-name my-fastapi-lambda \
-    #         --zip-file fileb://function.zip
+      # --- PART 2: SYNC FASTAPI TO LAMBDA ---
+      
+      # Push app.py from repo root to Lambda
+      - name: Zip and Deploy Lambda
+        run: |
+          zip function.zip app.py 
+          aws lambda update-function-code \
+            --function-name my-fastapi-lambda \
+            --zip-file fileb://function.zip
