@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+nbconvert
+papermill
+jupyter
+gitpython
+
+numpy
+scipy
+pandas
+matplotlib
+laspy
+rasterio
+shapely
