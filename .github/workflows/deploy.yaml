@@ -48,5 +48,5 @@ jobs:
         run: |
           zip function.zip app.py 
           aws lambda update-function-code \
-            --function-name my-fastapi-lambda \
+            --function-name notebook2rest \
             --zip-file fileb://function.zip
