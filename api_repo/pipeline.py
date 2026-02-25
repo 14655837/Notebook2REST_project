@@ -6,14 +6,14 @@ import glob
 import git
 import papermill as pm
 import nbformat
+import ast
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from typing import Dict, Any
 
-# -----------------------------
-# Configuration
-# -----------------------------
+#Set up URL and folders
 REPO_URL = "https://github.com/14655837/test_repo_for_notebook"
+#REPO_URL = "https://github.com/NaaVRE/vl-laserfarm"
 REPO_DIR = "repo"
 NOTEBOOK_OUTPUT_DIR = "outputs"
 
@@ -69,6 +69,41 @@ def extract_notebook_outputs(output_path: str) -> dict:
             results.append(cell_out)
     return {"cells": results}
 
+def get_param_variables_json(output_path: str):
+    """
+    Find all the parameters, starting with 'param_', and put them in a json format
+    """
+    try:
+        nb = nbformat.read(output_path, as_version=4)
+        extracted_params = {}
+
+        for cell in nb.cells:
+            if cell.cell_type == "code":
+                try:
+                    # Put in AST
+                    tree = ast.parse(cell.source)
+                    
+                    # Look for assignment nodes
+                    for node in ast.walk(tree):
+                        if isinstance(node, ast.Assign):
+                            for target in node.targets:
+                                # Check if var starts with 'param_'
+                                if isinstance(target, ast.Name) and target.id.startswith("param_"):
+                                    try:
+                                        # Safely evaluate the value (strings, numbers, lists, dicts)
+                                        value = ast.literal_eval(node.value)
+                                        extracted_params[target.id] = value
+                                    except (ValueError, SyntaxError):
+                                        # If it's a complex expression, we label it or skip it
+                                        extracted_params[target.id] = "Expression/Non-Literal"
+                except SyntaxError:
+                    # Skip cells that have invalid Python syntax
+                    continue
+
+        return extracted_params
+
+    except Exception as e:
+        return {"error": f"Failed to parse notebook: {str(e)}"}
 
 app = FastAPI(title="Notebook Runner API")
 
@@ -77,7 +112,8 @@ clone_repo()
 notebooks = find_notebooks()
 print("Available notebooks:", notebooks)
 
-class NotebookParams(BaseModel):
+class RunRequest(BaseModel):
+    notebook_name: str
     parameters: Dict[str, Any] = {}
 
 @app.get("/notebooks")
@@ -86,15 +122,11 @@ def list_notebooks():
     return {"notebooks": [os.path.basename(nb) for nb in notebooks]}
 
 @app.post("/run")
-def run_notebook(
-    notebook_name: str = Query(..., description="Notebook filename to run"),
-    params: NotebookParams = None
-):
-    """Run a notebook with optional parameters."""
-    notebook_path = next((nb for nb in notebooks if os.path.basename(nb) == notebook_name), None)
+def run_notebook(req: RunRequest):
+    notebook_path = next((nb for nb in notebooks if os.path.basename(nb) == req.notebook_name), None)
     if not notebook_path:
         raise HTTPException(status_code=404, detail="Notebook not found")
-
-    output_path = execute_notebook(notebook_path, params.parameters if params else {})
+    output_path = execute_notebook(notebook_path, req.parameters)
     outputs = extract_notebook_outputs(output_path)
-    return {"notebook": notebook_name, "outputs": outputs}
+    params = get_param_variables_json(output_path)
+    return {"notebook": req.notebook_name, "params": params, "outputs": outputs}

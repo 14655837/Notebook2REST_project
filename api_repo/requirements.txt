@@ -12,3 +12,4 @@ matplotlib
 laspy
 rasterio
 shapely
+json

@@ -1,0 +1,20 @@
+os
+shutil
+stat
+glob
+git
+papermill
+nbformat
+ast
+fastapi
+pydantic
+typing
+
+# All the libraries used in githubs of spiros
+minio 
+rasterio
+laserfarm 
+laspy
+json
+matplotlib
+gdal
