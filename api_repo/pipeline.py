@@ -12,8 +12,8 @@ from pydantic import BaseModel
 from typing import Dict, Any
 
 #Set up URL and folders
-REPO_URL = "https://github.com/14655837/test_repo_for_notebook"
-#REPO_URL = "https://github.com/NaaVRE/vl-laserfarm"
+#REPO_URL = "https://github.com/14655837/test_repo_for_notebook"
+REPO_URL = "https://github.com/NaaVRE/vl-laserfarm"
 REPO_DIR = "repo"
 NOTEBOOK_OUTPUT_DIR = "outputs"
 
@@ -44,12 +44,12 @@ def execute_notebook(notebook_path: str, parameters: Dict[str, Any] = None) -> s
     notebook_name = os.path.basename(notebook_path).replace(".ipynb", "")
     output_path = os.path.join(NOTEBOOK_OUTPUT_DIR, f"{notebook_name}_output.ipynb")
 
-    pm.execute_notebook(
-        notebook_path,
-        output_path,
-        parameters=parameters or {},
-        kernel_name="python3"
-    )
+    # pm.execute_notebook(
+    #     notebook_path,
+    #     output_path,
+    #     parameters=parameters or {},
+    #     kernel_name="python3"
+    # )
     return output_path
 
 def extract_notebook_outputs(output_path: str) -> dict:
@@ -127,6 +127,6 @@ def run_notebook(req: RunRequest):
     if not notebook_path:
         raise HTTPException(status_code=404, detail="Notebook not found")
     output_path = execute_notebook(notebook_path, req.parameters)
-    outputs = extract_notebook_outputs(output_path)
+    #outputs = extract_notebook_outputs(output_path)
     params = get_param_variables_json(output_path)
-    return {"notebook": req.notebook_name, "params": params, "outputs": outputs}
+    return {"notebook": req.notebook_name, "params": params}
