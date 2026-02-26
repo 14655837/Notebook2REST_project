@@ -46,7 +46,7 @@ jobs:
       # Push app.py from repo root to Lambda
       - name: Zip and Deploy Lambda
         run: |
-          zip -r function.zip api_repo 
+          zip -r function.zip app.py
           aws lambda update-function-code \
             --function-name notebook2rest \
             --zip-file fileb://function.zip
