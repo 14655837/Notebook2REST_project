@@ -33,11 +33,29 @@ def load_payload() -> dict:
             return json.loads(Path(arg).read_text(encoding="utf-8-sig"))
         return json.loads(arg)
 
-    # 2) JSON in env var
+    # 2) Full payload JSON in env var
     if os.getenv("JOB_JSON"):
         return json.loads(os.environ["JOB_JSON"])
 
-    # 3) JSON file path (fallback)
+    # 3) AWS Batch style: NOTEBOOK_PARAMS contains just the params dict
+    if os.getenv("NOTEBOOK_PARAMS"):
+        try:
+            params = json.loads(os.environ["NOTEBOOK_PARAMS"])
+        except json.JSONDecodeError as e:
+            raise SystemExit(f"NOTEBOOK_PARAMS is not valid JSON: {e}") from e
+
+        payload = {"params": params}
+
+        # output path is best provided by Batch as NOTEBOOK_OUT (S3 or local)
+        payload["notebook_out"] = os.getenv("NOTEBOOK_OUT") or "/app/out/run.executed.ipynb"
+
+        # Optional: keep job id around for logging / later use
+        if os.getenv("JOB_ID"):
+            payload["job_id"] = os.environ["JOB_ID"]
+
+        return payload
+
+    # 4) JSON file path (fallback)
     job_file = os.getenv("JOB_JSON_FILE", "/app/job.json")
     return json.loads(Path(job_file).read_text(encoding="utf-8-sig"))
 
@@ -96,19 +114,16 @@ def patch_cell_source(source: str, params: dict) -> tuple[str, int]:
 
         for n in ast.walk(tree):
             if isinstance(n, ast.Assign):
-                # param_a = ...
-                # (also works for "param_a = param_b = 1": we patch the RHS once)
+                # Patch any assign where at least one target is a param_* we know about.
                 param_targets = [
                     t.id
                     for t in n.targets
                     if isinstance(t, ast.Name) and t.id.startswith("param_") and t.id in params
                 ]
                 if param_targets:
-                    # Patch the RHS to match JSON; any number of param_ targets will now get that value.
                     add_value_patch(n.value, param_targets[-1])
 
             elif isinstance(n, ast.AnnAssign):
-                # param_a: str = ...
                 if isinstance(n.target, ast.Name):
                     name = n.target.id
                     if name.startswith("param_") and name in params:
@@ -122,7 +137,6 @@ def patch_cell_source(source: str, params: dict) -> tuple[str, int]:
             return new_source, len(patches)
 
     except SyntaxError:
-        # Fall through to regex patching
         pass
 
     # 2) Regex fallback patching (single-line assignments)
@@ -168,6 +182,10 @@ def main() -> int:
         nbformat.write(nb, str(patched))
 
         cmd = ["papermill", str(patched), notebook_out]
+        # Helpful in Batch logs
+        if "job_id" in payload:
+            print(f"JOB_ID={payload['job_id']}", flush=True)
+
         print(f"Patched {total} assignment(s).", flush=True)
         print("Running:", " ".join(cmd), flush=True)
         return subprocess.call(cmd)
