@@ -7,11 +7,7 @@ import uuid
 
 import boto3
 
-from config import ACCOUNT_ID, REGION
-
-ECR_REPO = "notebook2rest"
 JOB_QUEUE = "Notebook2REST-fargate-job-queue"
-JOB_DEFINITION = "Notebook2REST-fargate-job-definition"
 
 
 def start_job(notebook: str, params: dict) -> str:
@@ -19,24 +15,23 @@ def start_job(notebook: str, params: dict) -> str:
     Submits an AWS Batch job to execute the specified notebook with the given parameters.
 
     Args:
-        notebook (str): The name of the notebook (used to resolve the ECR image). The name should exactly match the image name in ECR (without the tag).
-        params (dict): A dictionary of parameters to pass to the notebook container. Passed as a single json string environment variable to the container.
+        notebook (str): The name of the notebook. Must match the job definition name
+            registered at deploy time as Notebook2REST-<notebook>.
+        params (dict): A dictionary of parameters to pass to the notebook container.
+            Passed as a single JSON string environment variable to the container.
 
     Returns:
         str: A unique job ID (UUID) identifying the submitted batch job.
+            This ID can be used to query job status via the Notebook2REST-<job_id> job name in AWS Batch.
     """
 
-    job_id = str(uuid.uuid4())  # Create a unique job ID
-    image_uri = (
-        f"{ACCOUNT_ID}.dkr.ecr.{REGION}.amazonaws.com/{ECR_REPO}/{notebook}:latest"
-    )
+    job_id = str(uuid.uuid4())
 
     boto3.client("batch").submit_job(
-        jobName=f"notebook-{notebook}",
+        jobName=f"Notebook2REST-{job_id}",
         jobQueue=JOB_QUEUE,
-        jobDefinition=JOB_DEFINITION,
+        jobDefinition=f"Notebook2REST-{notebook}",
         containerOverrides={
-            "image": image_uri,
             "environment": [
                 {"name": "JOB_ID", "value": job_id},
                 {"name": "NOTEBOOK_PARAMS", "value": json.dumps(params)},

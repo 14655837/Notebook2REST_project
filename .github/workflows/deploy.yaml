@@ -4,49 +4,57 @@ on:
     branches: [ main ]
 
 permissions:
-  id-token: write   # Required for OIDC
-  contents: read    # Required to checkout code
+  id-token: write
+  contents: read
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      ECR_REGISTRY: ""  # set after login step below
+      ECR_REPOSITORY: notebook2rest
+      NOTEBOOK_NAME: notebook
     steps:
-      # Read the code from the repository
       - name: Checkout Code  
         uses: actions/checkout@v4
 
-      # Use OIDC to get AWS credentials
       - name: Configure AWS Credentials  
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: eu-west-1
       
-      # Just to confirm the OIDC setup is working
       - name: Verify Identity  
         run: aws sts get-caller-identity
 
-      # --- PART 1: BUILD & PUSH DOCKER IMAGE ---
+      # --- PART 1: BUILD & PUSH NOTEBOOK IMAGE ---
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      - name: Set ECR Registry
+        run: echo "ECR_REGISTRY=${{ steps.login-ecr.outputs.registry }}" >> $GITHUB_ENV
+
       - name: Build, Tag, and Push Image to ECR
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: notebook2rest
-          IMAGE_TAG: latest
         run: |
-          run: |
           docker build \
-            -t $ECR_REGISTRY/$ECR_REPOSITORY/notebook:$IMAGE_TAG \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:$NOTEBOOK_NAME \
             -f ./docker/Dockerfile \
             ./docker
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY/notebook:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$NOTEBOOK_NAME
 
-      # --- PART 2: SYNC FASTAPI TO LAMBDA ---
-      
-      # Push app.py from repo root to Lambda
+      # --- PART 2: REGISTER JOB DEFINITION ---
+      - name: Register Batch Job Definition
+        run: |
+          IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY:$NOTEBOOK_NAME"
+          aws batch register-job-definition \
+            --job-definition-name "Notebook2REST-$NOTEBOOK_NAME" \
+            --type container \
+            --cli-input-json "$(jq --arg img "$IMAGE_URI" \
+              '.containerProperties.image = $img' \
+              .github/batch/job-definition-template.json)"
+
+      # --- PART 3: SYNC FASTAPI TO LAMBDA ---
       - name: Zip and Deploy Lambda
         run: |
           cd api_repo
