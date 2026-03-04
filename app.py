@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 from mangum import Mangum
 from typing import Optional, Dict
 import json
+from aws-batch import start_job
 
 app = FastAPI()
 
@@ -53,7 +54,8 @@ def run_notebook(
             else:
                 params[p] = other_params[p]
     # TODO: handle container deployment
-    execution_id = 69420
+    valid_name = notebook_name.lower().rstrip(".ipynb")
+    execution_id = start_job(valid_name, params)
     return JSONResponse(
         status_code=status.HTTP_202_ACCEPTED,
         content={"execution_id": execution_id}
