@@ -1,0 +1,11 @@
+﻿{
+  "notebook_out": "/app/out/run.executed.ipynb",
+  "params": {
+    "param_func": "divide",
+    "param_var_x": 6,
+    "param_var_y": 2,
+    "param_func_mult": "multiply",
+    "param_var_x2": 80001,
+    "param_var_y2": 2
+  }
+}
