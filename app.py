@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 from mangum import Mangum
 from typing import Optional, Dict
 import json
-from aws-batch import start_job
+from aws_batch import start_job
 
 app = FastAPI()
 
