@@ -26,20 +26,25 @@ jobs:
       - name: Verify Identity  
         run: aws sts get-caller-identity
 
-    #   # --- PART 1: BUILD & PUSH DOCKER IMAGE ---
-    #   - name: Login to Amazon ECR
-    #     id: login-ecr
-    #     uses: aws-actions/amazon-ecr-login@v2
+      # --- PART 1: BUILD & PUSH DOCKER IMAGE ---
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
-    #   - name: Build, Tag, and Push Image to ECR
-    #     env:
-    #       ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-    #       ECR_REPOSITORY: my-batch-image-repo
-    #       IMAGE_TAG: latest # Or ${{ github.sha }} if using Immutable tags
-    #     run: |
-    #       # Here is where you'd run your script to convert Notebook -> Dockerfile
-    #       docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-    #       docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+      - name: Ensure ECR repository exists
+        run: |
+          aws ecr describe-repositories --repository-names notebook-runner || \
+          aws ecr create-repository --repository-name notebook-runner
+
+      - name: Build, Tag, and Push Image to ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: notebook-runner
+          IMAGE_TAG: latest
+          DOCKER_CONTEXT: ./docker
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $DOCKER_CONTEXT
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
       # --- PART 2: SYNC FASTAPI TO LAMBDA ---
       
