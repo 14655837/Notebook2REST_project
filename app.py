@@ -11,9 +11,6 @@ app = FastAPI()
 def root():
     return {"message": "post to /notebook"}
 
-# @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
-# def catch_all(path: str):
-#     return {"message": "Hello World", "path": path}
 @app.post("/notebook/{notebook_name}")
 def run_notebook(
     notebook_name: str,
@@ -55,7 +52,14 @@ def run_notebook(
                 params[p] = other_params[p]
     # TODO: handle container deployment
     valid_name = notebook_name.lower().rstrip(".ipynb")
-    execution_id = start_job(valid_name, params)
+    execution_id = 0
+    try:
+        execution_id = start_job(valid_name, params)
+    except:
+        raise HTTPException(
+            status_code=500,
+            detail="something went wrong while starting job"
+        )
     return JSONResponse(
         status_code=status.HTTP_202_ACCEPTED,
         content={"execution_id": execution_id}
@@ -63,3 +67,4 @@ def run_notebook(
 
 
 handler = Mangum(app)
+
