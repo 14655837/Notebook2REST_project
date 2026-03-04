@@ -31,15 +31,10 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Ensure ECR repository exists
-        run: |
-          aws ecr describe-repositories --repository-names notebook-runner || \
-          aws ecr create-repository --repository-name notebook-runner
-
       - name: Build, Tag, and Push Image to ECR
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: notebook-runner
+          ECR_REPOSITORY: notebook2rest
           IMAGE_TAG: latest
           DOCKER_CONTEXT: ./docker
         run: |
