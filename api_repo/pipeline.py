@@ -88,7 +88,7 @@ def main():
     for nb in notebooks:
         output_path = execute_notebook(nb)
         params = get_param_variables_json(output_path)
-        all_params[nb] = params
+        all_params[nb.split("/")[-1]] = params
     with open("paramdump.json", "w") as f:
         json.dump(all_params, f, indent=4)
 
