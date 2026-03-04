@@ -38,7 +38,11 @@ jobs:
           IMAGE_TAG: latest
           DOCKER_CONTEXT: ./docker
         run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $DOCKER_CONTEXT
+          run: |
+          docker build \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            -f ./docker/Dockerfile \
+            ./docker
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
       # --- PART 2: SYNC FASTAPI TO LAMBDA ---
