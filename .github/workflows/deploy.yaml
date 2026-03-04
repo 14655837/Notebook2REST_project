@@ -36,7 +36,6 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           ECR_REPOSITORY: notebook2rest
           IMAGE_TAG: latest
-          DOCKER_CONTEXT: ./docker
         run: |
           run: |
           docker build \
