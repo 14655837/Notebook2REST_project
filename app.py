@@ -47,14 +47,14 @@ def run_notebook(
                 )
             else:
                 params[p] = other_params[p]
-    valid_name = notebook_name.lower().rstrip(".ipynb")
+    valid_name = notebook_name.lower().removesuffix(".ipynb")
     execution_id = 0
     try:
-        execution_id = start_job(valid_name, params)
-    except:
+        execution_id = start_job("notebook", params)
+    except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail="something went wrong while starting job"
+            detail=str(e)
         )
     return JSONResponse(
         status_code=status.HTTP_202_ACCEPTED,
@@ -63,4 +63,3 @@ def run_notebook(
 
 
 handler = Mangum(app)
-
