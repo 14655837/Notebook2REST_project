@@ -30,16 +30,13 @@ def run_notebook(
             202 if notebook successfully started execution
         container execution id (?) if successful
     """
-    # print("works")
     dump = open("paramdump.json", "r", encoding="utf-8")
     all_params = json.load(dump)
-    # print("works")
     if notebook_name not in all_params.keys():
         raise HTTPException(
         status_code=421,
         detail="notebook does not exist"
     )
-    # print("works")
     params = all_params[notebook_name]
     if other_params:
         for p in other_params.keys():
@@ -50,7 +47,6 @@ def run_notebook(
                 )
             else:
                 params[p] = other_params[p]
-    # TODO: handle container deployment
     valid_name = notebook_name.lower().rstrip(".ipynb")
     execution_id = 0
     try:
