@@ -9,28 +9,29 @@ API_PATH=$2
 BODY=${3:-null}
 
 AWS=$(command -v aws 2>/dev/null) || { echo "Error: aws CLI not found"; exit 1; }
+$AWS sts get-caller-identity --no-cli-pager > /dev/null || { echo "Error: AWS identity check failed — verify credentials"; exit 1; }
 PYTHON3=$(command -v python3 2>/dev/null || true)
 
 format_json() {
-  if [ -n "$PYTHON3" ]; then
-    "$PYTHON3" -c '
-import sys, json
-data = sys.stdin.read()
-decoder = json.JSONDecoder()
-idx = 0
-while idx < len(data):
-    try:
-        obj, end = decoder.raw_decode(data, idx)
-        print(json.dumps(obj, indent=2))
-        idx = end
-        while idx < len(data) and data[idx] in " \t\n\r":
-            idx += 1
-    except Exception:
-        break
-'
-  else
+#   if [ -n "$PYTHON3" ]; then
+#     "$PYTHON3" -c '
+# import sys, json
+# data = sys.stdin.read()
+# decoder = json.JSONDecoder()
+# idx = 0
+# while idx < len(data):
+#     try:
+#         obj, end = decoder.raw_decode(data, idx)
+#         print(json.dumps(obj, indent=2))
+#         idx = end
+#         while idx < len(data) and data[idx] in " \t\n\r":
+#             idx += 1
+#     except Exception:
+#         break
+# '
+#   else
     cat
-  fi
+  # fi
 }
 
 TMPFILE=$(mktemp)
