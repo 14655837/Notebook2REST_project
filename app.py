@@ -1,21 +1,21 @@
-from fastapi import FastAPI, Body, HTTPException, status
+import json
+from typing import Dict, Optional
+
+from aws_batch import start_job
+from fastapi import Body, FastAPI, HTTPException, status
 from fastapi.responses import JSONResponse
 from mangum import Mangum
-from typing import Optional, Dict
-import json
-from aws_batch import start_job
 
 app = FastAPI()
+
 
 @app.get("/")
 def root():
     return {"message": "post to /notebook"}
 
+
 @app.post("/notebook/{notebook_name}")
-def run_notebook(
-    notebook_name: str,
-    other_params: Optional[Dict] = Body(default=None)
-):
+def run_notebook(notebook_name: str, other_params: Optional[Dict] = Body(default=None)):
     """
     args:
         notebook_name: name of the notebook to be deployed
@@ -30,35 +30,27 @@ def run_notebook(
             202 if notebook successfully started execution
         container execution id (?) if successful
     """
-    dump = open("paramdump.json", "r", encoding="utf-8")
-    all_params = json.load(dump)
+    with open("paramdump.json", "r", encoding="utf-8") as dump:
+        all_params = json.load(dump)
     if notebook_name not in all_params.keys():
-        raise HTTPException(
-        status_code=421,
-        detail="notebook does not exist"
-    )
+        raise HTTPException(status_code=421, detail="notebook does not exist")
     params = all_params[notebook_name]
     if other_params:
         for p in other_params.keys():
             if p not in params.keys():
                 raise HTTPException(
-                    status_code=400,
-                    detail=f"given param {p} does not exist"
+                    status_code=400, detail=f"given param {p} does not exist"
                 )
             else:
                 params[p] = other_params[p]
     valid_name = notebook_name.lower().removesuffix(".ipynb")
     execution_id = 0
     try:
-        execution_id = start_job("notebook", params)
+        execution_id = start_job(valid_name, params)
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=500, detail=str(e))
     return JSONResponse(
-        status_code=status.HTTP_202_ACCEPTED,
-        content={"execution_id": execution_id}
+        status_code=status.HTTP_202_ACCEPTED, content={"execution_id": execution_id}
     )
 
 

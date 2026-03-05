@@ -1,23 +1,23 @@
-from fastapi import FastAPI, Body, HTTPException, status
+import json
+from typing import Dict, Optional
+
+from fastapi import Body, FastAPI, HTTPException, status
 from fastapi.responses import JSONResponse
 from mangum import Mangum
-from typing import Optional, Dict
-import json
 
 app = FastAPI()
+
 
 @app.get("/")
 def root():
     return {"message": "post to /notebook"}
 
+
 # @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
 # def catch_all(path: str):
 #     return {"message": "Hello World", "path": path}
 @app.post("/notebook/{notebook_name}")
-def run_notebook(
-    notebook_name: str,
-    other_params: Optional[Dict] = Body(default=None)
-):
+def run_notebook(notebook_name: str, other_params: Optional[Dict] = Body(default=None)):
     """
     args:
         notebook_name: name of the notebook to be deployed
@@ -33,30 +33,25 @@ def run_notebook(
         container execution id (?) if successful
     """
     # print("works")
-    dump = open("paramdump.json", "r", encoding="utf-8")
-    all_params = json.load(dump)
+    with open("paramdump.json", "r", encoding="utf-8") as dump:
+        all_params = json.load(dump)
     # print("works")
     if notebook_name not in all_params.keys():
-        raise HTTPException(
-        status_code=421,
-        detail="notebook does not exist"
-    )
+        raise HTTPException(status_code=421, detail="notebook does not exist")
     # print("works")
     params = all_params[notebook_name]
     if other_params:
         for p in other_params.keys():
             if p not in params.keys():
                 raise HTTPException(
-                    status_code=400,
-                    detail=f"given param {p} does not exist"
+                    status_code=400, detail=f"given param {p} does not exist"
                 )
             else:
                 params[p] = other_params[p]
     # TODO: handle container deployment
     execution_id = 69420
     return JSONResponse(
-        status_code=status.HTTP_202_ACCEPTED,
-        content={"execution_id": execution_id}
+        status_code=status.HTTP_202_ACCEPTED, content={"execution_id": execution_id}
     )
 
 
