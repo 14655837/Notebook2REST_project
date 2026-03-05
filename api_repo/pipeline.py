@@ -7,8 +7,8 @@ import json
 import nbformat
 import ast
 from typing import Dict, Any
-#REPO_URL = "https://github.com/14655837/test_repo_for_notebook"
-REPO_URL = "https://github.com/NaaVRE/vl-laserfarm"
+REPO_URL = "https://github.com/14655837/test_repo_for_notebook"
+#REPO_URL = "https://github.com/NaaVRE/vl-laserfarm"
 REPO_DIR = "repo"
 NOTEBOOK_OUTPUT_DIR = "outputs"
 
@@ -93,3 +93,4 @@ def main():
         json.dump(all_params, f, indent=4)
 
 main()
+
