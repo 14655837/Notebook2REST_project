@@ -50,7 +50,7 @@ def run_notebook(
     valid_name = notebook_name.lower().removesuffix(".ipynb")
     execution_id = 0
     try:
-        execution_id = start_job("notebook", params)
+        execution_id = start_job(valid_name, params)
     except Exception as e:
         raise HTTPException(
             status_code=500,
