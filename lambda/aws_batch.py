@@ -26,7 +26,7 @@ def start_job(notebook: str, params: dict) -> str:
     """
 
     job_id = str(uuid.uuid4())
-    notebook_output_location = f"s3://notebook2rest/{job_id}/"
+    notebook_output_location = f"s3://notebook2rest/{job_id}.ipynb"
 
     boto3.client("batch").submit_job(
         jobName=f"Notebook2REST-{job_id}",
