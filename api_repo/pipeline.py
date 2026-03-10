@@ -12,7 +12,8 @@ import nbformat
 REPO_URL = "https://github.com/14655837/test_repo_for_notebook"
 # REPO_URL = "https://github.com/NaaVRE/vl-laserfarm"
 REPO_DIR = "repo"
-NOTEBOOK_OUTPUT_DIR = "outputs"
+REPO_ROOT = ".." 
+NOTEBOOK_OUTPUT_DIR = os.path.join(REPO_ROOT, "notebooks")
 
 os.makedirs(NOTEBOOK_OUTPUT_DIR, exist_ok=True)
 
@@ -32,17 +33,11 @@ def find_notebooks() -> list[str]:
     return notebooks
 
 
-def execute_notebook(notebook_path: str, parameters: Dict[str, Any] = None) -> str:
+def add_notebook_to_github(notebook_path: str, parameters: Dict[str, Any] = None) -> str:
     """Executes a notebook with optional parameters, returns output path."""
     notebook_name = os.path.basename(notebook_path).replace(".ipynb", "")
-    output_path = os.path.join(NOTEBOOK_OUTPUT_DIR, f"{notebook_name}_output.ipynb")
+    output_path = os.path.join(NOTEBOOK_OUTPUT_DIR, f"{notebook_name}.ipynb")
 
-    # pm.execute_notebook(
-    #     notebook_path,
-    #     output_path,
-    #     parameters=parameters or {},
-    #     kernel_name="python3"
-    # )
     return output_path
 
 
@@ -106,7 +101,7 @@ def main():
     notebooks = find_notebooks()
     all_params = {}
     for nb in notebooks:
-        execute_notebook(nb)
+        add_notebook_to_github(nb)
         params = get_param_variables_json(nb)
         all_params[nb.split("/")[-1]] = params
     with open("paramdump.json", "w") as f:
