@@ -8,6 +8,7 @@ import uuid
 import boto3
 
 JOB_QUEUE = "Notebook2REST-fargate-job-queue"
+JOBNAME_PREFIX = "Notebook2REST-"
 
 
 def start_job(notebook: str, params: dict) -> str:
@@ -29,9 +30,9 @@ def start_job(notebook: str, params: dict) -> str:
     notebook_output_location = f"s3://notebook2rest/{job_id}.ipynb"
 
     boto3.client("batch").submit_job(
-        jobName=f"Notebook2REST-{job_id}",
+        jobName=f"{JOBNAME_PREFIX}{job_id}",
         jobQueue=JOB_QUEUE,
-        jobDefinition=f"Notebook2REST-{notebook}",
+        jobDefinition=f"{JOBNAME_PREFIX}{notebook}",
         containerOverrides={
             "environment": [
                 {"name": "NOTEBOOK_OUT", "value": notebook_output_location},
@@ -41,3 +42,34 @@ def start_job(notebook: str, params: dict) -> str:
     )
 
     return job_id
+
+def get_job_status(job_id: str) -> str:
+    """
+    Retrieves the status of a submitted AWS Batch job using its unique job ID.
+
+    Uses a JOB_NAME filter for a direct lookup, avoiding a full queue scan.
+
+    Args:
+        job_id (str): The unique job ID (UUID) assigned when the job was submitted via start_job().
+
+    Returns:
+        str: The current status of the job: "SUBMITTED", "PENDING", "RUNNABLE",
+            "STARTING", "RUNNING", "SUCCEEDED", or "FAILED".
+
+    Raises:
+        Error: If no job is found with the given job ID.
+    """
+    
+    job_name = f"{JOBNAME_PREFIX}{job_id}"
+
+    response = boto3.client("batch").batch_client.list_jobs(
+        jobQueue=JOB_QUEUE,
+        filters=[{"name": "JOB_NAME", "values": [job_name]}],
+    )
+
+    jobs = response.get("jobSummaryList", [])
+    if not jobs:
+        raise ValueError(f"No job found with ID '{job_id}' (looked up as '{job_name}').")
+
+    # The filter is an exact name match, so there should only ever be one result.
+    return jobs[0]["status"]
