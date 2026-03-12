@@ -59,10 +59,10 @@ def get_job_status(job_id: str) -> str:
     Raises:
         Error: If no job is found with the given job ID.
     """
-    
+
     job_name = f"{JOBNAME_PREFIX}{job_id}"
 
-    response = boto3.client("batch").batch_client.list_jobs(
+    response = boto3.client("batch").list_jobs(
         jobQueue=JOB_QUEUE,
         filters=[{"name": "JOB_NAME", "values": [job_name]}],
     )
