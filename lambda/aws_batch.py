@@ -1,14 +1,22 @@
 """
-This module defines the `start_job` function, which submits an AWS Batch job to execute a specified notebook with given parameters. 
+This module provides functions for interacting with AWS Batch and S3 to execute Jupyter notebooks
+as batch jobs. It exposes three functions:
+
+- `start_job`: Submits an AWS Batch job to execute a specified notebook with given parameters.
+- `get_job_status`: Retrieves the current status of a submitted batch job.
+- `get_job_output`: Fetches the executed notebook output from S3 once the job has completed.
 """
 
 import json
 import uuid
 
 import boto3
+from botocore.exceptions import ClientError
 
 JOB_QUEUE = "Notebook2REST-fargate-job-queue"
 JOBNAME_PREFIX = "Notebook2REST-"
+S3_BUCKET = "notebook2rest"
+NOTEBOOK_EXTENSION = ".ipynb"
 
 
 def start_job(notebook: str, params: dict) -> str:
@@ -27,7 +35,7 @@ def start_job(notebook: str, params: dict) -> str:
     """
 
     job_id = str(uuid.uuid4())
-    notebook_output_location = f"s3://notebook2rest/{job_id}.ipynb"
+    notebook_output_location = f"s3://{S3_BUCKET}/{job_id}{NOTEBOOK_EXTENSION}"
 
     boto3.client("batch").submit_job(
         jobName=f"{JOBNAME_PREFIX}{job_id}",
@@ -42,6 +50,7 @@ def start_job(notebook: str, params: dict) -> str:
     )
 
     return job_id
+
 
 def get_job_status(job_id: str) -> str:
     """
@@ -69,7 +78,42 @@ def get_job_status(job_id: str) -> str:
 
     jobs = response.get("jobSummaryList", [])
     if not jobs:
-        raise ValueError(f"No job found with ID '{job_id}' (looked up as '{job_name}').")
+        raise ValueError(
+            f"No job found with ID '{job_id}' (looked up as '{job_name}')."
+        )
 
     # The filter is an exact name match, so there should only ever be one result.
     return jobs[0]["status"]
+
+
+def get_job_output(job_id: str) -> bytes:
+    """
+    Retrieves the executed notebook output from S3 for a completed job.
+
+    The output location is derived from the job ID, matching the path written
+    by the notebook container on job completion.
+
+    Args:
+        job_id (str): The unique job ID (UUID) returned by start_job().
+
+    Returns:
+        bytes: The raw contents of the executed output notebook (.ipynb).
+
+    Raises:
+        ValueError: If the output file does not exist in S3, likely because
+            the job has not completed yet or failed before writing output.
+        ClientError: If the AWS API call fails due to permissions or an invalid request.
+    """
+    s3_key = f"{job_id}{NOTEBOOK_EXTENSION}"
+
+    try:
+        response = boto3.client("s3").get_object(Bucket=S3_BUCKET, Key=s3_key)
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "NoSuchKey":
+            raise ValueError(
+                f"No output found for job '{job_id}'. "
+                "The job may still be running or may have failed before writing output."
+            ) from e
+        raise
+
+    return response["Body"].read()
