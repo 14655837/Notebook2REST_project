@@ -12,3 +12,5 @@ Jona is the product manager and has the task to keep the overview over the proje
 Mike and Theo has the task to translate the notebook to REST and to create the fastAPI part that would later be connected to the cloud and docker part.
 Colin had the task to handle the part about docker.
 
+## Scrum
+
