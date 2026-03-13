@@ -117,3 +117,33 @@ def get_job_output(job_id: str) -> bytes:
         raise
 
     return response["Body"].read()
+
+
+def get_running_jobs() -> list[str]:
+    """
+    Retrieves the UUIDs of all currently running AWS Batch jobs submitted
+    through this service.
+
+    Returns:
+        list[str]: A list of job UUIDs corresponding to jobs in the RUNNING state.
+    """
+
+    batch = boto3.client("batch")
+
+    response = batch.list_jobs(
+        jobQueue=JOB_QUEUE,
+        jobStatus="RUNNING",
+    )
+
+    jobs = response.get("jobSummaryList", [])
+    running_ids = []
+
+    for job in jobs:
+        job_name = job["jobName"]
+
+        if job_name.startswith(JOBNAME_PREFIX):
+            job_id = job_name.removeprefix(JOBNAME_PREFIX)
+            running_ids.append(job_id)
+
+    return running_ids
+

@@ -13,6 +13,24 @@ app = FastAPI()
 def root():
     return {"message": "post to /notebook"}
 
+
+@app.get("/notebook/list")
+def get_job_list():
+    job_list = []
+    try:
+        job_list = get_running_jobs()
+    except Exception as e:
+        raise HTTPException(
+            status_code=404,
+            detail=str(e)
+        )
+    return JSONResponse(
+        status_code=status.HTTP_202_ACCEPTED,
+        content={"running job IDs": job_list}
+    )
+
+
+
 @app.get("/notebook/{job_id}")
 def get_status(job_id: str):
     job_status = ""
