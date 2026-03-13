@@ -13,6 +13,21 @@ app = FastAPI()
 def root():
     return {"message": "post to /notebook"}
 
+@app.get("notebook/{job_id}")
+def get_status(job_id: str):
+    status = ""
+    try:
+        status = get_job_status(job_id)
+    except Exception as e:
+        raise HTTPException(
+            status_code=404,
+            detail=str(e)
+        )
+    return JSONResponse(
+        status_code=status.HTTP_202_ACCEPTED,
+        content={"status": status}
+    )
+
 
 @app.post("/notebook/{notebook_name}")
 def run_notebook(notebook_name: str, other_params: Optional[Dict] = Body(default=None)):
