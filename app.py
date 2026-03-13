@@ -5,9 +5,9 @@ from aws_batch import *
 from fastapi import Body, FastAPI, HTTPException, status
 from fastapi.responses import JSONResponse, HTMLResponse
 from mangum import Mangum
-import boto3
-import nbformat
-from nbconvert import HTMLExporter
+# import boto3
+# import nbformat
+# from nbconvert import HTMLExporter
 
 BUCKET_NAME = "notebook2rest"
 OBJECT_KEY = "0edd97d4-8a66-47ca-a523-b58116e862a5.ipynb"
@@ -48,22 +48,22 @@ def get_status(job_id: str):
         content={"status": job_status}
     )
 
-def get_notebook_from_s3(bucket, key):
-    s3 = boto3.client('s3')
-    response = s3.get_object(Bucket=bucket, Key=key)
-    notebook_content = response['Body'].read().decode('utf-8')
-    return nbformat.reads(notebook_content, as_version=4)
+# def get_notebook_from_s3(bucket, key):
+#     s3 = boto3.client('s3')
+#     response = s3.get_object(Bucket=bucket, Key=key)
+#     notebook_content = response['Body'].read().decode('utf-8')
+#     return nbformat.reads(notebook_content, as_version=4)
 
-@app.get("/view-notebook", response_class=HTMLResponse)
-async def view_notebook():
-    nb_node = get_notebook_from_s3(BUCKET_NAME, OBJECT_KEY)
+# @app.get("/view-notebook", response_class=HTMLResponse)
+# async def view_notebook():
+#     nb_node = get_notebook_from_s3(BUCKET_NAME, OBJECT_KEY)
     
-    html_exporter = HTMLExporter()
-    html_exporter.template_name = 'lab'
+#     html_exporter = HTMLExporter()
+#     html_exporter.template_name = 'lab'
     
-    (body, resources) = html_exporter.from_notebook_node(nb_node)
+#     (body, resources) = html_exporter.from_notebook_node(nb_node)
     
-    return body
+#     return body
 
 @app.post("/notebook/{notebook_name}")
 def run_notebook(notebook_name: str, other_params: Optional[Dict] = Body(default=None)):
