@@ -1,7 +1,7 @@
 import json
 from typing import Dict, Optional
 
-from aws_batch import start_job
+from aws_batch import *
 from fastapi import Body, FastAPI, HTTPException, status
 from fastapi.responses import JSONResponse
 from mangum import Mangum
@@ -13,7 +13,7 @@ app = FastAPI()
 def root():
     return {"message": "post to /notebook"}
 
-@app.get("notebook/{job_id}")
+@app.get("/notebook/{job_id}")
 def get_status(job_id: str):
     status = ""
     try:
@@ -70,3 +70,4 @@ def run_notebook(notebook_name: str, other_params: Optional[Dict] = Body(default
 
 
 handler = Mangum(app)
+
