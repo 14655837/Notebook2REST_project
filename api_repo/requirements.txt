@@ -3,7 +3,7 @@ uvicorn
 nbconvert
 papermill
 jupyter
-#gitpython
+gitpython
 
 numpy
 scipy

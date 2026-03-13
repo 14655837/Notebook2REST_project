@@ -57,6 +57,7 @@ jobs:
       # --- PART 3: SYNC FASTAPI TO LAMBDA ---
       - name: Zip and Deploy Lambda
         run: |
+          pip install gitpython
           cd api_repo
           pip install -r requirements.txt --target ../lambda-build
           python3 pipeline.py
