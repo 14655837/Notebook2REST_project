@@ -15,9 +15,9 @@ def root():
 
 @app.get("/notebook/{job_id}")
 def get_status(job_id: str):
-    status = ""
+    job_status = ""
     try:
-        status = get_job_status(job_id)
+        job_status = get_job_status(job_id)
     except Exception as e:
         raise HTTPException(
             status_code=404,
@@ -25,7 +25,7 @@ def get_status(job_id: str):
         )
     return JSONResponse(
         status_code=status.HTTP_202_ACCEPTED,
-        content={"status": status}
+        content={"status": job_status}
     )
 
 
