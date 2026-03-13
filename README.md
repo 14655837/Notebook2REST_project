@@ -14,3 +14,4 @@ Colin had the task to handle the part about docker.
 
 ## Scrum
 
+Scrum is used by doing a sprint every week.
