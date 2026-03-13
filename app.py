@@ -1,23 +1,28 @@
 import json
 from typing import Dict, Optional
 
-from aws_batch import start_job
+from aws_batch import *
 from fastapi import Body, FastAPI, HTTPException, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from mangum import Mangum
+import boto3
+import nbformat
+from nbconvert import HTMLExporter
+
+BUCKET_NAME = "notebook2rest"
+OBJECT_KEY = "0edd97d4-8a66-47ca-a523-b58116e862a5.ipynb"
 
 app = FastAPI()
-
 
 @app.get("/")
 def root():
     return {"message": "post to /notebook"}
 
-@app.get("notebook/{job_id}")
-def get_status(job_id: str):
-    status = ""
+@app.get("/notebook/list")
+def get_job_list():
+    job_list = []
     try:
-        status = get_job_status(job_id)
+        job_list = get_running_jobs()
     except Exception as e:
         raise HTTPException(
             status_code=404,
@@ -25,9 +30,40 @@ def get_status(job_id: str):
         )
     return JSONResponse(
         status_code=status.HTTP_202_ACCEPTED,
-        content={"status": status}
+        content={"running job IDs": job_list}
     )
 
+@app.get("/notebook/{job_id}")
+def get_status(job_id: str):
+    job_status = ""
+    try:
+        job_status = get_job_status(job_id)
+    except Exception as e:
+        raise HTTPException(
+            status_code=404,
+            detail=str(e)
+        )
+    return JSONResponse(
+        status_code=status.HTTP_202_ACCEPTED,
+        content={"status": job_status}
+    )
+
+def get_notebook_from_s3(bucket, key):
+    s3 = boto3.client('s3')
+    response = s3.get_object(Bucket=bucket, Key=key)
+    notebook_content = response['Body'].read().decode('utf-8')
+    return nbformat.reads(notebook_content, as_version=4)
+
+@app.get("/view-notebook", response_class=HTMLResponse)
+async def view_notebook():
+    nb_node = get_notebook_from_s3(BUCKET_NAME, OBJECT_KEY)
+    
+    html_exporter = HTMLExporter()
+    html_exporter.template_name = 'lab'
+    
+    (body, resources) = html_exporter.from_notebook_node(nb_node)
+    
+    return body
 
 @app.post("/notebook/{notebook_name}")
 def run_notebook(notebook_name: str, other_params: Optional[Dict] = Body(default=None)):
@@ -70,3 +106,4 @@ def run_notebook(notebook_name: str, other_params: Optional[Dict] = Body(default
 
 
 handler = Mangum(app)
+
