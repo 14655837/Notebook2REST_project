@@ -94,7 +94,8 @@ def run_notebook(notebook_name: str, other_params: Optional[Dict] = Body(default
                 )
             else:
                 params[p] = other_params[p]
-    valid_name = notebook_name.lower().removesuffix(".ipynb")
+    # valid_name = notebook_name.lower().removesuffix(".ipynb")
+    valid_name = notebook_name.removesuffix(".ipynb")
     execution_id = 0
     try:
         execution_id = start_job(valid_name, params)

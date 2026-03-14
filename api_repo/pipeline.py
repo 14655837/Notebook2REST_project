@@ -9,8 +9,9 @@ from typing import Any, Dict
 import git
 import nbformat
 
-REPO_URL = "https://github.com/14655837/test_repo_for_notebook"
+# REPO_URL = "https://github.com/14655837/test_repo_for_notebook"
 # REPO_URL = "https://github.com/NaaVRE/vl-laserfarm"
+REPO_URL = "https://github.com/TheoGatea/vl-laserfarm"
 REPO_DIR = "repo"
 REPO_ROOT = ".." 
 NOTEBOOK_OUTPUT_DIR = os.path.join(REPO_ROOT, "notebooks")
