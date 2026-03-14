@@ -48,12 +48,15 @@ jobs:
 
             # echo "Processing notebook: $NOTEBOOK_NAME"
 
-            # Build image
+            cd ..
+
             docker build \
               -t $IMAGE_URI \
-              -f ../docker/Dockerfile \
-              ../docker \
+              -f docker/Dockerfile \
+              . \
               --build-arg NOTEBOOK_NAME=$NOTEBOOK_NAME
+
+            cd vl-laserfarm
 
             # Push image
             docker push $IMAGE_URI
