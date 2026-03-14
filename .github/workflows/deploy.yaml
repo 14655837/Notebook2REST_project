@@ -27,6 +27,9 @@ jobs:
       - name: Verify Identity  
         run: aws sts get-caller-identity
 
+      - name: clone repo
+        run: git clone git@github.com:TheoGatea/vl-laserfarm.git
+
         # --- PART 1: BUILD, PUSH AND REGISTER FOR EACH NOTEBOOK ---
       - name: Build, Push and Register Notebooks
         run: |
