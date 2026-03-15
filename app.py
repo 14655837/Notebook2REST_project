@@ -5,12 +5,9 @@ from aws_batch import *
 from fastapi import Body, FastAPI, HTTPException, status
 from fastapi.responses import JSONResponse, HTMLResponse
 from mangum import Mangum
-# import boto3
-# import nbformat
-# from nbconvert import HTMLExporter
 
 BUCKET_NAME = "notebook2rest"
-OBJECT_KEY = "0edd97d4-8a66-47ca-a523-b58116e862a5.ipynb"
+s3 = boto3.client("s3")
 
 app = FastAPI()
 
@@ -48,22 +45,21 @@ def get_status(job_id: str):
         content={"status": job_status}
     )
 
-# def get_notebook_from_s3(bucket, key):
-#     s3 = boto3.client('s3')
-#     response = s3.get_object(Bucket=bucket, Key=key)
-#     notebook_content = response['Body'].read().decode('utf-8')
-#     return nbformat.reads(notebook_content, as_version=4)
 
-# @app.get("/view-notebook", response_class=HTMLResponse)
-# async def view_notebook():
-#     nb_node = get_notebook_from_s3(BUCKET_NAME, OBJECT_KEY)
-    
-#     html_exporter = HTMLExporter()
-#     html_exporter.template_name = 'lab'
-    
-#     (body, resources) = html_exporter.from_notebook_node(nb_node)
-    
-#     return body
+@app.get("/latest-notebook")
+def view_notebook():
+    response = s3.list_objects_v2(Bucket=BUCKET_NAME)
+
+    files = [
+        obj for obj in response.get("Contents", [])
+        if obj["Key"].endswith(".ipynb")
+    ]
+
+    latest = max(files, key=lambda x: x["LastModified"])
+
+    s3_uri = f"s3://{BUCKET_NAME}/{latest['Key']}"
+
+    return s3_uri
 
 @app.post("/notebook/{notebook_name}")
 def run_notebook(notebook_name: str, other_params: Optional[Dict] = Body(default=None)):
