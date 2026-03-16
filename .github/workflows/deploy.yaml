@@ -28,49 +28,49 @@ jobs:
         run: aws sts get-caller-identity
 
         # --- PART 1: BUILD, PUSH AND REGISTER FOR EACH NOTEBOOK ---
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Set ECR Registry
-        run: echo "ECR_REGISTRY=${{ steps.login-ecr.outputs.registry }}" >> $GITHUB_ENV
-
-      - name: clone repo
-        run: git clone https://github.com/TheoGatea/vl-laserfarm.git
-
-      - name: Build, Push and Register Notebooks
-        run: |
-          cd vl-laserfarm
-
-          for notebook in *.ipynb; do
-            NOTEBOOK_NAME=$(basename "$notebook" .ipynb)
-            IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY:$NOTEBOOK_NAME"
-
-            # echo "Processing notebook: $NOTEBOOK_NAME"
-
-            cd ..
-
-            docker build \
-              -t $IMAGE_URI \
-              -f docker/Dockerfile \
-              . \
-              --build-arg NOTEBOOK_NAME=$NOTEBOOK_NAME
-
-            cd vl-laserfarm
-
-            # Push image
-            docker push $IMAGE_URI
-
-            # Register AWS Batch job definition
-            aws batch register-job-definition \
-              --job-definition-name "Notebook2REST-$NOTEBOOK_NAME" \
-              --type container \
-              --cli-input-json "$(jq --arg img "$IMAGE_URI" \
-                '.containerProperties.image = $img' \
-                ../.github/batch/job-definition-template.json)"
-
-          done
-          cd ..
+#      - name: Login to Amazon ECR
+#        id: login-ecr
+#        uses: aws-actions/amazon-ecr-login@v2
+#
+#      - name: Set ECR Registry
+#        run: echo "ECR_REGISTRY=${{ steps.login-ecr.outputs.registry }}" >> $GITHUB_ENV
+#
+#      - name: clone repo
+#        run: git clone https://github.com/TheoGatea/vl-laserfarm.git
+#
+#      - name: Build, Push and Register Notebooks
+#        run: |
+#          cd vl-laserfarm
+#
+#          for notebook in *.ipynb; do
+#            NOTEBOOK_NAME=$(basename "$notebook" .ipynb)
+#            IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY:$NOTEBOOK_NAME"
+#
+#            # echo "Processing notebook: $NOTEBOOK_NAME"
+#
+#            cd ..
+#
+#            docker build \
+#              -t $IMAGE_URI \
+#              -f docker/Dockerfile \
+#              . \
+#              --build-arg NOTEBOOK_NAME=$NOTEBOOK_NAME
+#
+#            cd vl-laserfarm
+#
+#            # Push image
+#            docker push $IMAGE_URI
+#
+#            # Register AWS Batch job definition
+#            aws batch register-job-definition \
+#              --job-definition-name "Notebook2REST-$NOTEBOOK_NAME" \
+#              --type container \
+#              --cli-input-json "$(jq --arg img "$IMAGE_URI" \
+#                '.containerProperties.image = $img' \
+#                ../.github/batch/job-definition-template.json)"
+#
+#          done
+#          cd ..
 
       # --- PART 3: SYNC FASTAPI TO LAMBDA ---
       - name: Zip and Deploy Lambda

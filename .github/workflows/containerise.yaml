@@ -1,0 +1,62 @@
+name: containerise notebooks
+on:
+  workflow_call:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      ECR_REGISTRY: ""  # set after login step below
+      ECR_REPOSITORY: notebook2rest
+    steps:
+      - name: Checkout Code  
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials  
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: eu-west-1
+      
+      - name: Verify Identity  
+        run: aws sts get-caller-identity
+
+        # --- PART 1: BUILD, PUSH AND REGISTER FOR EACH NOTEBOOK ---
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set ECR Registry
+        run: echo "ECR_REGISTRY=${{ steps.login-ecr.outputs.registry }}" >> $GITHUB_ENV
+
+      - name: Build, Push and Register Notebooks
+        run: |
+          for notebook in *.ipynb; do
+            NOTEBOOK_NAME=$(basename "$notebook" .ipynb)
+            IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY:$NOTEBOOK_NAME"
+
+            echo "Processing notebook: $NOTEBOOK_NAME"
+
+            docker build \
+              -t $IMAGE_URI \
+              -f docker/Dockerfile \
+              . \
+              --build-arg NOTEBOOK_NAME=$NOTEBOOK_NAME
+
+            # Push image
+            docker push $IMAGE_URI
+
+            # Register AWS Batch job definition
+            aws batch register-job-definition \
+              --job-definition-name "Notebook2REST-$NOTEBOOK_NAME" \
+              --type container \
+              --cli-input-json "$(jq --arg img "$IMAGE_URI" \
+                '.containerProperties.image = $img' \
+                ../.github/batch/job-definition-template.json)"
+
+          done
+
