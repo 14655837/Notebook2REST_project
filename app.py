@@ -61,6 +61,31 @@ def view_notebook():
 
     return s3_uri
 
+@app.get("/notebook/{job_id}/uri")
+def get_s3_uri(job_id):
+    batch = boto3.client('batch')
+
+    try:
+        response = batch.describe_jobs(jobs=[job_id])
+        
+        if not response['jobs']:
+            raise HTTPException(status_code=404, detail="job_id not found in batch")
+
+        job_details = response['jobs'][0]
+        container = job_details.get('container', {})
+        env_vars = container.get('environment', [])
+        found_keys = [item['name'] for item in env_vars]
+
+        s3_uri = next((item['value'] for item in env_vars if item['name'] == 'NOTEBOOK_OUT'), None)
+        
+        if not s3_uri:
+            raise HTTPException(status_code=404, detail="OUTPUT_PATH not found")
+
+        return {'statusCode': 200, 's3_uri': s3_uri}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/notebook/{notebook_name}")
 def run_notebook(notebook_name: str, other_params: Optional[Dict] = Body(default=None)):
     """
