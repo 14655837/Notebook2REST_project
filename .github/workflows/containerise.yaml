@@ -56,7 +56,7 @@ jobs:
               --type container \
               --cli-input-json "$(jq --arg img "$IMAGE_URI" \
                 '.containerProperties.image = $img' \
-                ../.github/batch/job-definition-template.json)"
+                .github/batch/job-definition-template.json)"
 
           done
 
