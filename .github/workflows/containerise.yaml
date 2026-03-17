@@ -110,7 +110,7 @@ jobs:
               -t "$IMAGE_URI" \
               -f docker/Dockerfile \
               . \
-              --build-arg NOTEBOOK_NAME="$NOTEBOOK_NAME
+              --build-arg NOTEBOOK_NAME="$NOTEBOOK_NAME"
 
             docker push "$IMAGE_URI"
 
