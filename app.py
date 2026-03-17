@@ -7,13 +7,6 @@ from fastapi.responses import JSONResponse, Response
 from mangum import Mangum
 from pydantic import BaseModel
 
-app = FastAPI(
-    title="Notebook2REST",
-    description="REST API for executing Jupyter notebooks on AWS Batch",
-    version="2.0",
-)
-
-
 # ============================================================================
 # Pydantic Models
 # ============================================================================
@@ -47,26 +40,159 @@ class NotebookDetail(BaseModel):
     params: Dict[str, Any]
 
 
+class ErrorResponse(BaseModel):
+    error: str
+    detail: str
+
+
+# ============================================================================
+# Custom Exceptions
+# ============================================================================
+
+
+class NotebookNotFoundError(Exception):
+    def __init__(self, notebook: str):
+        self.notebook = notebook
+        self.message = f"No notebook named '{notebook}'. Use GET /jobs/notebooks to see available notebooks."
+
+
+class InvalidParamsError(Exception):
+    def __init__(self, invalid: list[str], valid: list[str]):
+        self.invalid = invalid
+        self.valid = valid
+
+
+class JobNotFoundError(Exception):
+    def __init__(self, job_id: str):
+        self.job_id = job_id
+
+
+class OutputNotReadyError(Exception):
+    def __init__(self, job_id: str, job_status: str):
+        self.job_id = job_id
+        self.job_status = job_status
+
+
+class InternalServerError(Exception):
+    def __init__(self, detail: str):
+        self.detail = detail
+
+
+# ============================================================================
+# FastAPI App
+# ============================================================================
+
+
+app = FastAPI(
+    title="Notebook2REST",
+    description="REST API for executing Jupyter notebooks on AWS Batch",
+    version="2.0",
+)
+
+
+# ============================================================================
+# Exception Handlers
+# ============================================================================
+
+
+@app.exception_handler(NotebookNotFoundError)
+async def notebook_not_found_handler(request, exc):
+    return JSONResponse(
+        status_code=404,
+        content={
+            "error": "notebook_not_found",
+            "detail": exc.message,
+        },
+    )
+
+
+@app.exception_handler(InvalidParamsError)
+async def invalid_params_handler(request, exc):
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": "invalid_params",
+            "detail": "Unknown parameters provided.",
+            "invalid": exc.invalid,
+            "valid": exc.valid,
+        },
+    )
+
+
+@app.exception_handler(JobNotFoundError)
+async def job_not_found_handler(request, exc):
+    return JSONResponse(
+        status_code=404,
+        content={
+            "error": "job_not_found",
+            "detail": f"No job found with id '{exc.job_id}'",
+        },
+    )
+
+
+@app.exception_handler(OutputNotReadyError)
+async def output_not_ready_handler(request, exc):
+    return JSONResponse(
+        status_code=409,
+        content={
+            "error": "output_not_ready",
+            "detail": "Job exists but has not produced output yet.",
+            "job_id": exc.job_id,
+            "status": exc.job_status,
+        },
+    )
+
+
+@app.exception_handler(InternalServerError)
+async def internal_error_handler(request, exc):
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "internal",
+            "detail": exc.detail,
+        },
+    )
+
+
+# ============================================================================
+# Reusable Error Response Documentation for OpenAPI
+# ============================================================================
+
+RESP_NOTEBOOK_NOT_FOUND = {
+    404: {"model": ErrorResponse, "description": "Notebook not found"}
+}
+RESP_JOB_NOT_FOUND = {404: {"model": ErrorResponse, "description": "Job not found"}}
+RESP_OUTPUT_NOT_READY = {
+    409: {
+        "model": ErrorResponse,
+        "description": "Job exists but output is not ready yet",
+    }
+}
+RESP_INVALID_PARAMS = {
+    422: {"model": ErrorResponse, "description": "Invalid parameters provided"}
+}
+RESP_INVALID_STATUS = {
+    422: {"model": ErrorResponse, "description": "Invalid status filter value"}
+}
+RESP_INTERNAL = {500: {"model": ErrorResponse, "description": "Internal server error"}}
+
+
 # ============================================================================
 # Helper Functions
 # ============================================================================
-
-
-def error_response(status_code: int, error: str, detail: str, **extra) -> JSONResponse:
-    """Build a consistent error response."""
-    body = {"error": error, "detail": detail, **extra}
-    return JSONResponse(status_code=status_code, content=body)
 
 
 def load_paramdump() -> dict:
     """Load and return the contents of paramdump.json.
 
     Raises:
-        FileNotFoundError: If paramdump.json does not exist.
-        json.JSONDecodeError: If the file is not valid JSON.
+        InternalServerError: If paramdump.json cannot be loaded.
     """
-    with open("paramdump.json", "r", encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open("paramdump.json", "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        raise InternalServerError("Could not load notebook definitions.")
 
 
 # ============================================================================
@@ -74,8 +200,13 @@ def load_paramdump() -> dict:
 # ============================================================================
 
 
-@app.post("/jobs")
-def create_job(request: JobCreateRequest) -> JSONResponse:
+@app.post(
+    "/jobs",
+    status_code=202,
+    response_model=JobResponse,
+    responses={**RESP_NOTEBOOK_NOT_FOUND, **RESP_INVALID_PARAMS, **RESP_INTERNAL},
+)
+def create_job(request: JobCreateRequest):
     """
     Create a new job to execute a notebook on AWS Batch.
 
@@ -85,23 +216,12 @@ def create_job(request: JobCreateRequest) -> JSONResponse:
       "params": { "param_var_x": 10, "param_var_y": 20 }
     }
     """
-    try:
-        paramdump = load_paramdump()
-    except (FileNotFoundError, json.JSONDecodeError) as e:
-        return error_response(
-            status_code=500,
-            error="internal",
-            detail="Could not load notebook definitions.",
-        )
+    paramdump = load_paramdump()
 
     # Validate notebook name
     notebook_with_ext = f"{request.notebook}.ipynb"
     if notebook_with_ext not in paramdump:
-        return error_response(
-            status_code=404,
-            error="notebook_not_found",
-            detail=f"No notebook named '{request.notebook}'. Use GET /jobs/notebooks to see available notebooks.",
-        )
+        raise NotebookNotFoundError(request.notebook)
 
     # Load defaults for this notebook
     params = paramdump[notebook_with_ext].copy()
@@ -110,41 +230,32 @@ def create_job(request: JobCreateRequest) -> JSONResponse:
     if request.params:
         invalid_keys = [k for k in request.params.keys() if k not in params]
         if invalid_keys:
-            return error_response(
-                status_code=422,
-                error="invalid_params",
-                detail="Unknown parameters provided.",
-                invalid=invalid_keys,
-                valid=list(params.keys()),
-            )
+            raise InvalidParamsError(invalid_keys, list(params.keys()))
         params.update(request.params)
 
     # Submit the job
     try:
         job_id = start_job(request.notebook, params)
     except Exception as e:
-        return error_response(
-            status_code=500,
-            error="internal",
-            detail=f"Failed to submit job: {str(e)}",
-        )
+        raise InternalServerError(f"Failed to submit job: {str(e)}")
 
-    response = JSONResponse(
-        status_code=status.HTTP_202_ACCEPTED,
-        content={
-            "id": job_id,
-            "notebook": request.notebook,
-            "status": "queued",
-        },
+    job_response = JobResponse(id=job_id, notebook=request.notebook, status="queued")
+    return JSONResponse(
+        status_code=202,
+        content=job_response.model_dump(),
+        headers={"Location": f"/jobs/{job_id}"},
     )
-    response.headers["Location"] = f"/jobs/{job_id}"
-    return response
 
 
-@app.get("/jobs")
+@app.get(
+    "/jobs",
+    status_code=200,
+    response_model=JobListResponse,
+    responses={**RESP_INVALID_STATUS, **RESP_INTERNAL},
+)
 def list_jobs(
     status_filter: Optional[str] = Query(None, alias="status")
-) -> JSONResponse:
+) -> JobListResponse:
     """
     List jobs, optionally filtered by status.
 
@@ -154,109 +265,82 @@ def list_jobs(
     try:
         jobs = list_all_jobs(status_filter=status_filter)
     except ValueError as e:
-        return error_response(
+        raise HTTPException(
             status_code=422,
-            error="invalid_status",
             detail=f"Must be one of: {', '.join(VALID_API_STATUSES)}.",
-            given=status_filter,
         )
     except Exception as e:
-        return error_response(
-            status_code=500,
-            error="internal",
-            detail=f"Failed to list jobs: {str(e)}",
-        )
+        raise InternalServerError(f"Failed to list jobs: {str(e)}")
 
-    return JSONResponse(
-        status_code=200,
-        content={"items": jobs},
-    )
+    return JobListResponse(items=[JobResponse(**job) for job in jobs])
 
 
-@app.get("/jobs/notebooks")
-def list_notebooks() -> JSONResponse:
+@app.get(
+    "/jobs/notebooks",
+    status_code=200,
+    response_model=NotebookListResponse,
+    responses={**RESP_INTERNAL},
+)
+def list_notebooks() -> NotebookListResponse:
     """
     List all available notebooks (names only).
     """
-    try:
-        paramdump = load_paramdump()
-    except (FileNotFoundError, json.JSONDecodeError):
-        return error_response(
-            status_code=500,
-            error="internal",
-            detail="Could not load notebook definitions.",
-        )
+    paramdump = load_paramdump()
 
     # Strip .ipynb extension
     items = [
-        {"notebook": name.removesuffix(".ipynb")} for name in sorted(paramdump.keys())
+        NotebookSummary(notebook=name.removesuffix(".ipynb"))
+        for name in sorted(paramdump.keys())
     ]
 
-    return JSONResponse(
-        status_code=status.HTTP_200_OK,
-        content={"items": items},
-    )
+    return NotebookListResponse(items=items)
 
 
-@app.get("/jobs/notebooks/{name}")
-def get_notebook_detail(name: str) -> JSONResponse:
+@app.get(
+    "/jobs/notebooks/{name}",
+    status_code=200,
+    response_model=NotebookDetail,
+    responses={**RESP_NOTEBOOK_NOT_FOUND, **RESP_INTERNAL},
+)
+def get_notebook_detail(name: str) -> NotebookDetail:
     """
     Get full detail for a notebook: its name and all accepted parameters with defaults.
     """
-    try:
-        paramdump = load_paramdump()
-    except (FileNotFoundError, json.JSONDecodeError):
-        return error_response(
-            status_code=500,
-            error="internal",
-            detail="Could not load notebook definitions.",
-        )
+    paramdump = load_paramdump()
 
     notebook_with_ext = f"{name}.ipynb"
     if notebook_with_ext not in paramdump:
-        return error_response(
-            status_code=404,
-            error="notebook_not_found",
-            detail=f"No notebook named '{name}'. Use GET /jobs/notebooks to see available notebooks.",
-        )
+        raise NotebookNotFoundError(name)
 
-    return JSONResponse(
-        status_code=status.HTTP_200_OK,
-        content={
-            "notebook": name,
-            "params": paramdump[notebook_with_ext],
-        },
-    )
+    return NotebookDetail(notebook=name, params=paramdump[notebook_with_ext])
 
 
-@app.get("/jobs/{job_id}")
-def get_job_detail(job_id: str) -> JSONResponse:
+@app.get(
+    "/jobs/{job_id}",
+    status_code=200,
+    response_model=JobResponse,
+    responses={**RESP_JOB_NOT_FOUND, **RESP_INTERNAL},
+)
+def get_job_detail(job_id: str) -> JobResponse:
     """
     Get the status and details of a single job.
     """
     try:
         job = get_job(job_id)
     except ValueError:
-        return error_response(
-            status_code=404,
-            error="job_not_found",
-            detail=f"No job found with id '{job_id}'",
-        )
+        raise JobNotFoundError(job_id)
     except Exception as e:
-        return error_response(
-            status_code=500,
-            error="internal",
-            detail=f"Failed to retrieve job: {str(e)}",
-        )
+        raise InternalServerError(f"Failed to retrieve job: {str(e)}")
 
-    return JSONResponse(
-        status_code=status.HTTP_200_OK,
-        content=job,
-    )
+    return JobResponse(**job)
 
 
-@app.get("/jobs/{job_id}/output")
-def download_job_output(job_id: str) -> Response | JSONResponse:
+@app.get(
+    "/jobs/{job_id}/output",
+    response_model=None,
+    responses={**RESP_JOB_NOT_FOUND, **RESP_OUTPUT_NOT_READY, **RESP_INTERNAL},
+)
+def download_job_output(job_id: str):
     """
     Download the executed output notebook file for a job.
     """
@@ -264,50 +348,24 @@ def download_job_output(job_id: str) -> Response | JSONResponse:
     try:
         job_detail = get_job(job_id)
     except ValueError:
-        return error_response(
-            status_code=404,
-            error="job_not_found",
-            detail=f"No job found with id '{job_id}'",
-        )
+        raise JobNotFoundError(job_id)
     except Exception as e:
-        return error_response(
-            status_code=500,
-            error="internal",
-            detail=f"Failed to retrieve job: {str(e)}",
-        )
+        raise InternalServerError(f"Failed to retrieve job: {str(e)}")
 
     # If job exists but output is not ready, return 409
     if job_detail["status"] != "succeeded":
-        return error_response(
-            status_code=409,
-            error="output_not_ready",
-            detail="Job exists but has not produced output yet.",
-            job_id=job_id,
-            status=job_detail["status"],
-        )
+        raise OutputNotReadyError(job_id, job_detail["status"])
 
     # Try to fetch the output
     try:
         notebook_bytes = get_job_output(job_id)
     except ValueError as e:
         # Job claims it succeeded but output is missing
-        return error_response(
-            status_code=500,
-            error="internal",
-            detail=str(e),
-        )
+        raise InternalServerError(str(e))
     except ClientError as e:
-        return error_response(
-            status_code=500,
-            error="internal",
-            detail=f"AWS error: {str(e)}",
-        )
+        raise InternalServerError(f"AWS error: {str(e)}")
     except Exception as e:
-        return error_response(
-            status_code=500,
-            error="internal",
-            detail=f"Failed to retrieve output: {str(e)}",
-        )
+        raise InternalServerError(f"Failed to retrieve output: {str(e)}")
 
     # Return the notebook file
     headers = {"Content-Disposition": f'attachment; filename="{job_id}.ipynb"'}
