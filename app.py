@@ -85,6 +85,10 @@ app = FastAPI(
     title="Notebook2REST",
     description="REST API for executing Jupyter notebooks on AWS Batch",
     version="2.0",
+    openapi_tags=[
+        {"name": "jobs", "description": "Create and inspect notebook execution jobs"},
+        {"name": "notebooks", "description": "Discover available notebooks and their accepted parameters"},
+    ],
 )
 
 
@@ -197,6 +201,7 @@ def load_paramdump() -> dict:
 
 @app.post(
     "/jobs/{notebook}",
+    tags=["jobs"],
     status_code=202,
     response_model=JobResponse,
     responses={**RESP_NOTEBOOK_NOT_FOUND, **RESP_INVALID_PARAMS, **RESP_INTERNAL},
@@ -250,6 +255,7 @@ def create_job(
 
 @app.get(
     "/jobs",
+    tags=["jobs"],
     status_code=200,
     response_model=JobListResponse,
     responses={**RESP_INVALID_STATUS, **RESP_INTERNAL},
@@ -278,6 +284,7 @@ def list_jobs(
 
 @app.get(
     "/jobs/notebooks",
+    tags=["notebooks"],
     status_code=200,
     response_model=NotebookListResponse,
     responses={**RESP_INTERNAL},
@@ -299,6 +306,7 @@ def list_notebooks() -> NotebookListResponse:
 
 @app.get(
     "/jobs/notebooks/{name}",
+    tags=["notebooks"],
     status_code=200,
     response_model=NotebookDetail,
     responses={**RESP_NOTEBOOK_NOT_FOUND, **RESP_INTERNAL},
@@ -318,6 +326,7 @@ def get_notebook_detail(name: str) -> NotebookDetail:
 
 @app.get(
     "/jobs/{job_id}",
+    tags=["jobs"],
     status_code=200,
     response_model=JobResponse,
     responses={**RESP_JOB_NOT_FOUND, **RESP_INTERNAL},
@@ -338,6 +347,7 @@ def get_job_detail(job_id: str) -> JobResponse:
 
 @app.get(
     "/jobs/{job_id}/output",
+    tags=["jobs"],
     response_model=None,
     responses={**RESP_JOB_NOT_FOUND, **RESP_OUTPUT_NOT_READY, **RESP_INTERNAL},
 )
