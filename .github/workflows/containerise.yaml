@@ -3,10 +3,10 @@ on:
   workflow_call:
     inputs:
       base_sha:
-        required: false
+        required: true
         type: string
       head_sha:
-        required: false
+        required: true
         type: string
 
 permissions:
@@ -21,7 +21,6 @@ jobs:
       ECR_REPOSITORY: notebook2rest
       EXTERNAL_REPO_URL: https://github.com/14655837/Notebook2REST_project.git
       EXTERNAL_REPO_DIR: Notebook2REST_project
-      EXTERNAL_SHA_S3_URI: s3://notebook2rest/build-state/notebook2rest-project-sha.txt
 
     steps:
       - name: Checkout Code
@@ -61,33 +60,16 @@ jobs:
         id: detect
         shell: bash
         run: |
-          HEAD_SHA="${{ inputs.head_sha }}"
-          BASE_SHA="${{ inputs.base_sha }}"
+          CHANGED_FILES="$(git diff --name-only '${{ inputs.base_sha }}' '${{ inputs.head_sha }}')"
 
-          [ -n "$HEAD_SHA" ] || HEAD_SHA="$GITHUB_SHA"
-          [ -n "$BASE_SHA" ] || BASE_SHA="$(git rev-parse "${HEAD_SHA}^" 2>/dev/null || true)"
-          [ -n "$BASE_SHA" ] || BASE_SHA="$(git hash-object -t tree /dev/null)"
-
-          CHANGED_FILES="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
-          CURRENT_EXTERNAL_SHA="$(git -C "$EXTERNAL_REPO_DIR" rev-parse HEAD)"
-
-          aws s3 cp "$EXTERNAL_SHA_S3_URI" external_repo_sha.txt 2>/dev/null || true
-          [ -f external_repo_sha.txt ] && PREVIOUS_EXTERNAL_SHA="$(cat external_repo_sha.txt)" || PREVIOUS_EXTERNAL_SHA=""
-
-          if echo "$CHANGED_FILES" | grep -Eq '^\.github/batch/job-definition-template\.json$' || \
-            { [ -n "$PREVIOUS_EXTERNAL_SHA" ] && [ "$CURRENT_EXTERNAL_SHA" != "$PREVIOUS_EXTERNAL_SHA" ]; }; then
-            NOTEBOOKS="$(find . -maxdepth 1 -name '*.ipynb' -printf '%f\n' | sed 's/\.ipynb$//' | sort -u)"
-          else
-            NOTEBOOKS="$(
-              {
-                echo "$CHANGED_FILES" | sed -n 's#^\(.*\)\.ipynb$#\1#p'
-                echo "$CHANGED_FILES" | sed -n 's#^\(.*\)-requirements\.txt$#\1#p'
-              } | sort -u | while read -r nb; do
-                [ -f "${nb}.ipynb" ] && echo "$nb"
-              done
-            )"
-
-          fi
+          NOTEBOOKS="$(
+            {
+              echo "$CHANGED_FILES" | sed -n 's#^\(.*\)\.ipynb$#\1#p'
+              echo "$CHANGED_FILES" | sed -n 's#^\(.*\)-requirements\.txt$#\1#p'
+            } | sort -u | while read -r nb; do
+              [ -f "${nb}.ipynb" ] && echo "$nb"
+            done
+          )"
 
           TOTAL_CHANGED=$(printf '%s\n' "$NOTEBOOKS" | sed '/^$/d' | wc -l)
           echo "Changed notebooks: $TOTAL_CHANGED"
@@ -98,7 +80,6 @@ jobs:
             echo "notebooks<<EOF"
             echo "$NOTEBOOKS"
             echo "EOF"
-            echo "current_external_sha=$CURRENT_EXTERNAL_SHA"
           } >> "$GITHUB_OUTPUT"
 
       - name: Build, Push and Register Notebooks
@@ -130,9 +111,3 @@ jobs:
                 '.containerProperties.image = $img' \
                 .github/batch/job-definition-template.json)"
           done <<< "${{ steps.detect.outputs.notebooks }}"
-
-      - name: Save external repo SHA
-        if: success()
-        run: |
-          echo "${{ steps.detect.outputs.current_external_sha }}" > external_repo_sha.txt
-          aws s3 cp external_repo_sha.txt "$EXTERNAL_SHA_S3_URI"
