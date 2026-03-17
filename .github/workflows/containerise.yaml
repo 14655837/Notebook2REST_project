@@ -1,6 +1,13 @@
 name: containerise notebooks
 on:
   workflow_call:
+    inputs:
+      base_sha:
+        required: false
+        type: string
+      head_sha:
+        required: false
+        type: string
 
 permissions:
   id-token: write
@@ -10,34 +17,39 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      ECR_REGISTRY: ""  # set after login step below
+      ECR_REGISTRY: ""
       ECR_REPOSITORY: notebook2rest
-    steps:
-      - name: Checkout Code  
-        uses: actions/checkout@v4
+      EXTERNAL_REPO_URL: https://github.com/14655837/Notebook2REST_project.git
+      EXTERNAL_REPO_DIR: Notebook2REST_project
+      EXTERNAL_SHA_S3_URI: s3://notebook2rest/build-state/notebook2rest-project-sha.txt
 
-      - name: Configure AWS Credentials  
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: eu-west-1
-      
-      - name: Verify Identity  
+
+      - name: Verify Identity
         run: aws sts get-caller-identity
 
-        # --- BUILD, PUSH AND REGISTER FOR EACH NOTEBOOK ---
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: clone docker source
         run: |
-          git clone https://github.com/14655837/Notebook2REST_project.git
-          cp -r Notebook2REST_project/docker .
+          git clone "$EXTERNAL_REPO_URL" "$EXTERNAL_REPO_DIR"
+          cp -r "$EXTERNAL_REPO_DIR/docker" .
+          cp "$EXTERNAL_REPO_DIR/pipeline.py" .
 
       - name: generate paramers and push to s3
         run: |
-          cp Notebook2REST_project/pipeline.py .
           pip install nbformat
           python3 pipeline.py
           aws s3 cp paramdump.json s3://notebook2rest/paramdump.json
@@ -45,30 +57,73 @@ jobs:
       - name: Set ECR Registry
         run: echo "ECR_REGISTRY=${{ steps.login-ecr.outputs.registry }}" >> $GITHUB_ENV
 
-      - name: Build, Push and Register Notebooks
+      - name: Detect changed notebooks
+        id: detect
+        shell: bash
         run: |
-          for notebook in *.ipynb; do
-            NOTEBOOK_NAME=$(basename "$notebook" .ipynb)
+          HEAD_SHA="${{ inputs.head_sha }}"
+          BASE_SHA="${{ inputs.base_sha }}"
+
+          [ -n "$HEAD_SHA" ] || HEAD_SHA="$GITHUB_SHA"
+          [ -n "$BASE_SHA" ] || BASE_SHA="$(git rev-parse "${HEAD_SHA}^" 2>/dev/null || true)"
+          [ -n "$BASE_SHA" ] || BASE_SHA="$(git hash-object -t tree /dev/null)"
+
+          CHANGED_FILES="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+          CURRENT_EXTERNAL_SHA="$(git -C "$EXTERNAL_REPO_DIR" rev-parse HEAD)"
+
+          aws s3 cp "$EXTERNAL_SHA_S3_URI" external_repo_sha.txt 2>/dev/null || true
+          [ -f external_repo_sha.txt ] && PREVIOUS_EXTERNAL_SHA="$(cat external_repo_sha.txt)" || PREVIOUS_EXTERNAL_SHA=""
+
+          if echo "$CHANGED_FILES" | grep -Eq '^\.github/batch/job-definition-template\.json$' || \
+             [ -z "$PREVIOUS_EXTERNAL_SHA" ] || \
+             [ "$CURRENT_EXTERNAL_SHA" != "$PREVIOUS_EXTERNAL_SHA" ]; then
+            NOTEBOOKS="$(find . -maxdepth 1 -name '*.ipynb' -printf '%f\n' | sed 's/\.ipynb$//' | sort -u)"
+          else
+            NOTEBOOKS="$(
+              {
+                echo "$CHANGED_FILES" | sed -n 's#^\(.*\)\.ipynb$#\1#p'
+                echo "$CHANGED_FILES" | sed -n 's#^\(.*\)-requirements\.txt$#\1#p'
+              } | sort -u | while read -r nb; do
+                [ -f "${nb}.ipynb" ] && echo "$nb"
+              done
+            )"
+          fi
+
+          [ -n "$NOTEBOOKS" ] && echo "has_changes=true" >> "$GITHUB_OUTPUT" || echo "has_changes=false" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "notebooks<<EOF"
+            echo "$NOTEBOOKS"
+            echo "EOF"
+            echo "current_external_sha=$CURRENT_EXTERNAL_SHA"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build, Push and Register Notebooks
+        if: steps.detect.outputs.has_changes == 'true'
+        run: |
+          while IFS= read -r NOTEBOOK_NAME; do
+            [ -z "$NOTEBOOK_NAME" ] && continue
+
             IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY:$NOTEBOOK_NAME"
 
-            echo "Processing notebook: $NOTEBOOK_NAME"
-
             docker build \
-              -t $IMAGE_URI \
+              -t "$IMAGE_URI" \
               -f docker/Dockerfile \
               . \
-              --build-arg NOTEBOOK_NAME=$NOTEBOOK_NAME
+              --build-arg NOTEBOOK_NAME="$NOTEBOOK_NAME
 
-            # Push image
-            docker push $IMAGE_URI
+            docker push "$IMAGE_URI"
 
-            # Register AWS Batch job definition
             aws batch register-job-definition \
               --job-definition-name "Notebook2REST-$NOTEBOOK_NAME" \
               --type container \
               --cli-input-json "$(jq --arg img "$IMAGE_URI" \
                 '.containerProperties.image = $img' \
                 .github/batch/job-definition-template.json)"
+          done <<< "${{ steps.detect.outputs.notebooks }}"
 
-          done
-
+      - name: Save external repo SHA
+        if: success()
+        run: |
+          echo "${{ steps.detect.outputs.current_external_sha }}" > external_repo_sha.txt
+          aws s3 cp external_repo_sha.txt "$EXTERNAL_SHA_S3_URI"
