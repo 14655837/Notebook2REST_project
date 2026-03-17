@@ -25,10 +25,15 @@ jobs:
       - name: Verify Identity  
         run: aws sts get-caller-identity
 
-        # --- PART 1: BUILD, PUSH AND REGISTER FOR EACH NOTEBOOK ---
+        # --- BUILD, PUSH AND REGISTER FOR EACH NOTEBOOK ---
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
+
+      - name: clone docker source
+        run: |
+          git clone https://github.com/14655837/Notebook2REST_project.git
+          cp -r Notebook2REST_project/docker .
 
       - name: Set ECR Registry
         run: echo "ECR_REGISTRY=${{ steps.login-ecr.outputs.registry }}" >> $GITHUB_ENV
