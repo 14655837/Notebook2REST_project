@@ -2,8 +2,9 @@ import json
 from typing import Dict, Optional
 
 from aws_batch import *
+from botocore.exceptions import ClientError
 from fastapi import Body, FastAPI, HTTPException, status
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import JSONResponse, Response
 from mangum import Mangum
 
 BUCKET_NAME = "notebook2rest"
@@ -11,9 +12,11 @@ s3 = boto3.client("s3")
 
 app = FastAPI()
 
+
 @app.get("/")
 def root():
     return {"message": "post to /notebook"}
+
 
 @app.get("/notebook/list")
 def get_job_list():
@@ -21,14 +24,11 @@ def get_job_list():
     try:
         job_list = get_running_jobs()
     except Exception as e:
-        raise HTTPException(
-            status_code=404,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=404, detail=str(e))
     return JSONResponse(
-        status_code=status.HTTP_202_ACCEPTED,
-        content={"running job IDs": job_list}
+        status_code=status.HTTP_202_ACCEPTED, content={"running job IDs": job_list}
     )
+
 
 @app.get("/notebook/{job_id}")
 def get_status(job_id: str):
@@ -36,13 +36,9 @@ def get_status(job_id: str):
     try:
         job_status = get_job_status(job_id)
     except Exception as e:
-        raise HTTPException(
-            status_code=404,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=404, detail=str(e))
     return JSONResponse(
-        status_code=status.HTTP_202_ACCEPTED,
-        content={"status": job_status}
+        status_code=status.HTTP_202_ACCEPTED, content={"status": job_status}
     )
 
 
@@ -51,8 +47,7 @@ def view_notebook():
     response = s3.list_objects_v2(Bucket=BUCKET_NAME)
 
     files = [
-        obj for obj in response.get("Contents", [])
-        if obj["Key"].endswith(".ipynb")
+        obj for obj in response.get("Contents", []) if obj["Key"].endswith(".ipynb")
     ]
 
     latest = max(files, key=lambda x: x["LastModified"])
@@ -61,30 +56,25 @@ def view_notebook():
 
     return s3_uri
 
-@app.get("/notebook/{job_id}/uri")
-def get_s3_uri(job_id):
-    batch = boto3.client('batch')
 
+@app.get("/notebook/{job_id}/output")
+def get_job_output_notebook(job_id: str):
     try:
-        response = batch.describe_jobs(jobs=[job_id])
-        
-        if not response['jobs']:
-            raise HTTPException(status_code=404, detail="job_id not found in batch")
-
-        job_details = response['jobs'][0]
-        container = job_details.get('container', {})
-        env_vars = container.get('environment', [])
-        found_keys = [item['name'] for item in env_vars]
-
-        s3_uri = next((item['value'] for item in env_vars if item['name'] == 'NOTEBOOK_OUT'), None)
-        
-        if not s3_uri:
-            raise HTTPException(status_code=404, detail="OUTPUT_PATH not found")
-
-        return {'statusCode': 200, 's3_uri': s3_uri}
-
+        notebook_bytes = get_job_output(job_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ClientError as e:
+        raise HTTPException(status_code=500, detail=f"AWS error: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+    headers = {"Content-Disposition": f'attachment; filename="{job_id}.ipynb"'}
+    return Response(
+        content=notebook_bytes,
+        media_type="application/x-ipynb+json",
+        headers=headers,
+    )
+
 
 @app.post("/notebook/{notebook_name}")
 def run_notebook(notebook_name: str, other_params: Optional[Dict] = Body(default=None)):
@@ -128,4 +118,3 @@ def run_notebook(notebook_name: str, other_params: Optional[Dict] = Body(default
 
 
 handler = Mangum(app)
-
