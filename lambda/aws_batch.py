@@ -103,8 +103,7 @@ def get_job(job_id: str) -> dict:
     """
     Look up a single job by its UUID and return its full details.
 
-    Uses the JOB_NAME filter, which searches across all statuses regardless
-    of the jobStatus parameter.
+    Uses the JOB_NAME filter to search across statuses.
 
     Args:
         job_id (str): The UUID returned by start_job().
@@ -120,7 +119,6 @@ def get_job(job_id: str) -> dict:
 
     response = batch.list_jobs(
         jobQueue=JOB_QUEUE,
-        jobStatus="RUNNING",  # ignored when filters are used, but parameter is required
         filters=[{"name": "JOB_NAME", "values": [job_name]}],
     )
 
