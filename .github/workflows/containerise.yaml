@@ -35,6 +35,13 @@ jobs:
           git clone https://github.com/14655837/Notebook2REST_project.git
           cp -r Notebook2REST_project/docker .
 
+      - name: generate paramers and push to s3
+        run: |
+          cp Notebook2REST_project/pipeline.py .
+          pip install nbformat
+          python3 pipeline.py
+          aws s3 cp paramdump.json s3://notebook2rest/paramdump.json
+
       - name: Set ECR Registry
         run: echo "ECR_REGISTRY=${{ steps.login-ecr.outputs.registry }}" >> $GITHUB_ENV
 
