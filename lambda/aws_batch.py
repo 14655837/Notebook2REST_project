@@ -1,9 +1,11 @@
 """
 This module provides functions for interacting with AWS Batch and S3 to execute Jupyter notebooks
-as batch jobs. It exposes three functions:
+as batch jobs. It exposes functions for job lifecycle management and output retrieval.
 
+Key functions:
 - `start_job`: Submits an AWS Batch job to execute a specified notebook with given parameters.
-- `get_job_status`: Retrieves the current status of a submitted batch job.
+- `get_job`: Retrieves the status of a submitted batch job by UUID.
+- `list_all_jobs`: Lists jobs across all statuses, with optional filtering.
 - `get_job_output`: Fetches the executed notebook output from S3 once the job has completed.
 """
 
@@ -17,6 +19,48 @@ JOB_QUEUE = "Notebook2REST-fargate-job-queue"
 JOBNAME_PREFIX = "Notebook2REST-"
 S3_BUCKET = "notebook2rest"
 NOTEBOOK_EXTENSION = ".ipynb"
+
+# Status mapping: AWS Batch statuses → simplified API statuses
+BATCH_STATUS_MAP = {
+    "SUBMITTED": "queued",
+    "PENDING": "queued",
+    "RUNNABLE": "queued",
+    "STARTING": "queued",
+    "RUNNING": "running",
+    "SUCCEEDED": "succeeded",
+    "FAILED": "failed",
+}
+
+API_TO_BATCH_STATUSES = {
+    "queued": ["SUBMITTED", "PENDING", "RUNNABLE", "STARTING"],
+    "running": ["RUNNING"],
+    "succeeded": ["SUCCEEDED"],
+    "failed": ["FAILED"],
+}
+
+ALL_BATCH_STATUSES = [
+    "SUBMITTED",
+    "PENDING",
+    "RUNNABLE",
+    "STARTING",
+    "RUNNING",
+    "SUCCEEDED",
+    "FAILED",
+]
+
+VALID_API_STATUSES = list(API_TO_BATCH_STATUSES.keys())
+
+
+def map_status(batch_status: str) -> str:
+    """Map AWS Batch status to simplified API status."""
+    return BATCH_STATUS_MAP.get(batch_status, batch_status.lower())
+
+
+def extract_job_uuid(job_name: str) -> str | None:
+    """Extract our UUID from a Batch job name like 'Notebook2REST-<uuid>'."""
+    if job_name.startswith(JOBNAME_PREFIX):
+        return job_name[len(JOBNAME_PREFIX) :]
+    return None
 
 
 def start_job(notebook: str, params: dict) -> str:
@@ -47,43 +91,58 @@ def start_job(notebook: str, params: dict) -> str:
                 {"name": "NOTEBOOK_PARAMS", "value": json.dumps(params)},
             ],
         },
+        tags={
+            "notebook": notebook,
+        },
     )
 
     return job_id
 
 
-def get_job_status(job_id: str) -> str:
+def get_job(job_id: str) -> dict:
     """
-    Retrieves the status of a submitted AWS Batch job using its unique job ID.
+    Look up a single job by its UUID and return its full details.
 
-    Uses a JOB_NAME filter for a direct lookup, avoiding a full queue scan.
+    Uses the JOB_NAME filter, which searches across all statuses regardless
+    of the jobStatus parameter.
 
     Args:
-        job_id (str): The unique job ID (UUID) assigned when the job was submitted via start_job().
+        job_id (str): The UUID returned by start_job().
 
     Returns:
-        str: The current status of the job: "SUBMITTED", "PENDING", "RUNNABLE",
-            "STARTING", "RUNNING", "SUCCEEDED", or "FAILED".
+        dict: {"id": str, "notebook": str, "status": str (simplified)}
 
     Raises:
-        Error: If no job is found with the given job ID.
+        ValueError: If no job is found with this ID.
     """
-
+    batch = boto3.client("batch")
     job_name = f"{JOBNAME_PREFIX}{job_id}"
 
-    response = boto3.client("batch").list_jobs(
+    response = batch.list_jobs(
         jobQueue=JOB_QUEUE,
+        jobStatus="RUNNING",  # ignored when filters are used, but parameter is required
         filters=[{"name": "JOB_NAME", "values": [job_name]}],
     )
 
     jobs = response.get("jobSummaryList", [])
     if not jobs:
-        raise ValueError(
-            f"No job found with ID '{job_id}' (looked up as '{job_name}')."
-        )
+        raise ValueError(f"No job found with id '{job_id}'")
 
-    # The filter is an exact name match, so there should only ever be one result.
-    return jobs[0]["status"]
+    batch_job_id = jobs[0]["jobId"]
+    raw_status = jobs[0]["status"]
+
+    # Get tags via describe_jobs
+    detail = batch.describe_jobs(jobs=[batch_job_id])
+    detail_jobs = detail.get("jobs", [])
+    notebook = "unknown"
+    if detail_jobs:
+        notebook = detail_jobs[0].get("tags", {}).get("notebook", "unknown")
+
+    return {
+        "id": job_id,
+        "notebook": notebook,
+        "status": map_status(raw_status),
+    }
 
 
 def get_job_output(job_id: str) -> bytes:
@@ -119,31 +178,68 @@ def get_job_output(job_id: str) -> bytes:
     return response["Body"].read()
 
 
-def get_running_jobs() -> list[str]:
+def list_all_jobs(status_filter: str | None = None) -> list[dict]:
     """
-    Retrieves the UUIDs of all currently running AWS Batch jobs submitted
-    through this service.
+    List jobs, optionally filtered by simplified status.
+
+    Args:
+        status_filter: One of "queued", "running", "succeeded", "failed", or None for all.
 
     Returns:
-        list[str]: A list of job UUIDs corresponding to jobs in the RUNNING state.
+        List of {"id": str, "notebook": str, "status": str} dicts.
+
+    Raises:
+        ValueError: If status_filter is not a valid simplified status.
     """
+    if status_filter and status_filter not in VALID_API_STATUSES:
+        raise ValueError(
+            f"Invalid status filter '{status_filter}'. Must be one of: {', '.join(VALID_API_STATUSES)}."
+        )
 
     batch = boto3.client("batch")
 
-    response = batch.list_jobs(
-        jobQueue=JOB_QUEUE,
-        jobStatus="RUNNING",
-    )
+    # Determine which AWS Batch statuses to query
+    if status_filter:
+        batch_statuses = API_TO_BATCH_STATUSES[status_filter]
+    else:
+        batch_statuses = ALL_BATCH_STATUSES
 
-    jobs = response.get("jobSummaryList", [])
-    running_ids = []
+    # Collect all job summaries across the relevant statuses
+    all_summaries = []
+    for batch_status in batch_statuses:
+        response = batch.list_jobs(
+            jobQueue=JOB_QUEUE,
+            jobStatus=batch_status,
+        )
+        for job in response.get("jobSummaryList", []):
+            if job["jobName"].startswith(JOBNAME_PREFIX):
+                all_summaries.append(job)
 
-    for job in jobs:
-        job_name = job["jobName"]
+    if not all_summaries:
+        return []
 
-        if job_name.startswith(JOBNAME_PREFIX):
-            job_id = job_name.removeprefix(JOBNAME_PREFIX)
-            running_ids.append(job_id)
+    # Batch call to get tags for all jobs at once
+    batch_job_ids = [job["jobId"] for job in all_summaries]
+    detail_response = batch.describe_jobs(jobs=batch_job_ids)
 
-    return running_ids
+    # Build lookup: AWS job ID → notebook name
+    notebook_lookup = {}
+    for detail_job in detail_response.get("jobs", []):
+        notebook_lookup[detail_job["jobId"]] = detail_job.get("tags", {}).get(
+            "notebook", "unknown"
+        )
 
+    # Build result list
+    results = []
+    for job in all_summaries:
+        job_uuid = extract_job_uuid(job["jobName"])
+        if job_uuid:
+            results.append(
+                {
+                    "id": job_uuid,
+                    "notebook": notebook_lookup.get(job["jobId"], "unknown"),
+                    "status": map_status(job["status"]),
+                }
+            )
+
+    return results

@@ -1,73 +1,315 @@
 import json
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from aws_batch import *
-from botocore.exceptions import ClientError
-from fastapi import Body, FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Query, status
 from fastapi.responses import JSONResponse, Response
 from mangum import Mangum
+from pydantic import BaseModel
 
-BUCKET_NAME = "notebook2rest"
-s3 = boto3.client("s3")
-
-app = FastAPI()
-
-
-@app.get("/")
-def root():
-    return {"message": "post to /notebook"}
+app = FastAPI(
+    title="Notebook2REST",
+    description="REST API for executing Jupyter notebooks on AWS Batch",
+    version="2.0",
+)
 
 
-@app.get("/notebook/list")
-def get_job_list():
-    job_list = []
+# ============================================================================
+# Pydantic Models
+# ============================================================================
+
+
+class JobCreateRequest(BaseModel):
+    notebook: str
+    params: Optional[Dict[str, Any]] = None
+
+
+class JobResponse(BaseModel):
+    id: str
+    notebook: str
+    status: str
+
+
+class JobListResponse(BaseModel):
+    items: list[JobResponse]
+
+
+class NotebookSummary(BaseModel):
+    notebook: str
+
+
+class NotebookListResponse(BaseModel):
+    items: list[NotebookSummary]
+
+
+class NotebookDetail(BaseModel):
+    notebook: str
+    params: Dict[str, Any]
+
+
+# ============================================================================
+# Helper Functions
+# ============================================================================
+
+
+def error_response(status_code: int, error: str, detail: str, **extra) -> JSONResponse:
+    """Build a consistent error response."""
+    body = {"error": error, "detail": detail, **extra}
+    return JSONResponse(status_code=status_code, content=body)
+
+
+def load_paramdump() -> dict:
+    """Load and return the contents of paramdump.json.
+
+    Raises:
+        FileNotFoundError: If paramdump.json does not exist.
+        json.JSONDecodeError: If the file is not valid JSON.
+    """
+    with open("paramdump.json", "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+# ============================================================================
+# Routes (CRITICAL: Order matters. Do not reorder.)
+# ============================================================================
+
+
+@app.post("/jobs")
+def create_job(request: JobCreateRequest) -> JSONResponse:
+    """
+    Create a new job to execute a notebook on AWS Batch.
+
+    Request body:
+    {
+      "notebook": "notebook",
+      "params": { "param_var_x": 10, "param_var_y": 20 }
+    }
+    """
     try:
-        job_list = get_running_jobs()
+        paramdump = load_paramdump()
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        return error_response(
+            status_code=500,
+            error="internal",
+            detail="Could not load notebook definitions.",
+        )
+
+    # Validate notebook name
+    notebook_with_ext = f"{request.notebook}.ipynb"
+    if notebook_with_ext not in paramdump:
+        return error_response(
+            status_code=404,
+            error="notebook_not_found",
+            detail=f"No notebook named '{request.notebook}'. Use GET /jobs/notebooks to see available notebooks.",
+        )
+
+    # Load defaults for this notebook
+    params = paramdump[notebook_with_ext].copy()
+
+    # Validate and merge user-provided parameters
+    if request.params:
+        invalid_keys = [k for k in request.params.keys() if k not in params]
+        if invalid_keys:
+            return error_response(
+                status_code=422,
+                error="invalid_params",
+                detail="Unknown parameters provided.",
+                invalid=invalid_keys,
+                valid=list(params.keys()),
+            )
+        params.update(request.params)
+
+    # Submit the job
+    try:
+        job_id = start_job(request.notebook, params)
     except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        return error_response(
+            status_code=500,
+            error="internal",
+            detail=f"Failed to submit job: {str(e)}",
+        )
+
+    response = JSONResponse(
+        status_code=status.HTTP_202_ACCEPTED,
+        content={
+            "id": job_id,
+            "notebook": request.notebook,
+            "status": "queued",
+        },
+    )
+    response.headers["Location"] = f"/jobs/{job_id}"
+    return response
+
+
+@app.get("/jobs")
+def list_jobs(
+    status_filter: Optional[str] = Query(None, alias="status")
+) -> JSONResponse:
+    """
+    List jobs, optionally filtered by status.
+
+    Query parameters:
+    - status: One of "queued", "running", "succeeded", "failed" (optional)
+    """
+    try:
+        jobs = list_all_jobs(status_filter=status_filter)
+    except ValueError as e:
+        return error_response(
+            status_code=422,
+            error="invalid_status",
+            detail=f"Must be one of: {', '.join(VALID_API_STATUSES)}.",
+            given=status_filter,
+        )
+    except Exception as e:
+        return error_response(
+            status_code=500,
+            error="internal",
+            detail=f"Failed to list jobs: {str(e)}",
+        )
+
     return JSONResponse(
-        status_code=status.HTTP_202_ACCEPTED, content={"running job IDs": job_list}
+        status_code=200,
+        content={"items": jobs},
     )
 
 
-@app.get("/notebook/{job_id}")
-def get_status(job_id: str):
-    job_status = ""
+@app.get("/jobs/notebooks")
+def list_notebooks() -> JSONResponse:
+    """
+    List all available notebooks (names only).
+    """
     try:
-        job_status = get_job_status(job_id)
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    return JSONResponse(
-        status_code=status.HTTP_202_ACCEPTED, content={"status": job_status}
-    )
+        paramdump = load_paramdump()
+    except (FileNotFoundError, json.JSONDecodeError):
+        return error_response(
+            status_code=500,
+            error="internal",
+            detail="Could not load notebook definitions.",
+        )
 
-
-@app.get("/latest-notebook")
-def view_notebook():
-    response = s3.list_objects_v2(Bucket=BUCKET_NAME)
-
-    files = [
-        obj for obj in response.get("Contents", []) if obj["Key"].endswith(".ipynb")
+    # Strip .ipynb extension
+    items = [
+        {"notebook": name.removesuffix(".ipynb")} for name in sorted(paramdump.keys())
     ]
 
-    latest = max(files, key=lambda x: x["LastModified"])
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={"items": items},
+    )
 
-    s3_uri = f"s3://{BUCKET_NAME}/{latest['Key']}"
 
-    return s3_uri
+@app.get("/jobs/notebooks/{name}")
+def get_notebook_detail(name: str) -> JSONResponse:
+    """
+    Get full detail for a notebook: its name and all accepted parameters with defaults.
+    """
+    try:
+        paramdump = load_paramdump()
+    except (FileNotFoundError, json.JSONDecodeError):
+        return error_response(
+            status_code=500,
+            error="internal",
+            detail="Could not load notebook definitions.",
+        )
+
+    notebook_with_ext = f"{name}.ipynb"
+    if notebook_with_ext not in paramdump:
+        return error_response(
+            status_code=404,
+            error="notebook_not_found",
+            detail=f"No notebook named '{name}'. Use GET /jobs/notebooks to see available notebooks.",
+        )
+
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={
+            "notebook": name,
+            "params": paramdump[notebook_with_ext],
+        },
+    )
 
 
-@app.get("/notebook/{job_id}/output")
-def get_job_output_notebook(job_id: str):
+@app.get("/jobs/{job_id}")
+def get_job_detail(job_id: str) -> JSONResponse:
+    """
+    Get the status and details of a single job.
+    """
+    try:
+        job = get_job(job_id)
+    except ValueError:
+        return error_response(
+            status_code=404,
+            error="job_not_found",
+            detail=f"No job found with id '{job_id}'",
+        )
+    except Exception as e:
+        return error_response(
+            status_code=500,
+            error="internal",
+            detail=f"Failed to retrieve job: {str(e)}",
+        )
+
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content=job,
+    )
+
+
+@app.get("/jobs/{job_id}/output")
+def download_job_output(job_id: str) -> Response | JSONResponse:
+    """
+    Download the executed output notebook file for a job.
+    """
+    # First, check if the job exists
+    try:
+        job_detail = get_job(job_id)
+    except ValueError:
+        return error_response(
+            status_code=404,
+            error="job_not_found",
+            detail=f"No job found with id '{job_id}'",
+        )
+    except Exception as e:
+        return error_response(
+            status_code=500,
+            error="internal",
+            detail=f"Failed to retrieve job: {str(e)}",
+        )
+
+    # If job exists but output is not ready, return 409
+    if job_detail["status"] != "succeeded":
+        return error_response(
+            status_code=409,
+            error="output_not_ready",
+            detail="Job exists but has not produced output yet.",
+            job_id=job_id,
+            status=job_detail["status"],
+        )
+
+    # Try to fetch the output
     try:
         notebook_bytes = get_job_output(job_id)
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        # Job claims it succeeded but output is missing
+        return error_response(
+            status_code=500,
+            error="internal",
+            detail=str(e),
+        )
     except ClientError as e:
-        raise HTTPException(status_code=500, detail=f"AWS error: {str(e)}")
+        return error_response(
+            status_code=500,
+            error="internal",
+            detail=f"AWS error: {str(e)}",
+        )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return error_response(
+            status_code=500,
+            error="internal",
+            detail=f"Failed to retrieve output: {str(e)}",
+        )
 
+    # Return the notebook file
     headers = {"Content-Disposition": f'attachment; filename="{job_id}.ipynb"'}
     return Response(
         content=notebook_bytes,
@@ -76,45 +318,8 @@ def get_job_output_notebook(job_id: str):
     )
 
 
-@app.post("/notebook/{notebook_name}")
-def run_notebook(notebook_name: str, other_params: Optional[Dict] = Body(default=None)):
-    """
-    args:
-        notebook_name: name of the notebook to be deployed
-        other_params: user-given parameters to be used instead
-            of what is dumped in paramdump.json . paramdump
-            contains defaults
-
-    out:
-        http response code:
-            421 if notebook doesnt exist
-            400 if parameters are misspelled
-            202 if notebook successfully started execution
-        container execution id (?) if successful
-    """
-    with open("paramdump.json", "r", encoding="utf-8") as dump:
-        all_params = json.load(dump)
-    if notebook_name not in all_params.keys():
-        raise HTTPException(status_code=421, detail="notebook does not exist")
-    params = all_params[notebook_name]
-    if other_params:
-        for p in other_params.keys():
-            if p not in params.keys():
-                raise HTTPException(
-                    status_code=400, detail=f"given param {p} does not exist"
-                )
-            else:
-                params[p] = other_params[p]
-    # valid_name = notebook_name.lower().removesuffix(".ipynb")
-    valid_name = notebook_name.removesuffix(".ipynb")
-    execution_id = 0
-    try:
-        execution_id = start_job(valid_name, params)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    return JSONResponse(
-        status_code=status.HTTP_202_ACCEPTED, content={"execution_id": execution_id}
-    )
-
+# ============================================================================
+# Lambda Handler
+# ============================================================================
 
 handler = Mangum(app)
