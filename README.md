@@ -23,7 +23,7 @@ The project has a few main parts:
 
 ### Parameter extraction
 
-`api_repo/pipeline.py` looks through notebooks and collects variables that start with `param_`. Those are written into `paramdump.json`, which is then used by the API to know which notebooks exist and which parameters they accept.
+`pipeline.py` looks through notebooks in the current working directory and collects variables that start with `param_`. Those are written into `paramdump.json`, which is then used by the API to know which notebooks exist and which parameters they accept.
 
 ### API layer
 
@@ -31,8 +31,10 @@ The project has a few main parts:
 
 - starting a notebook run,
 - checking the status of a job,
-- listing running jobs,
-- and getting the S3 location of the output notebook.
+- listing jobs,
+- listing available notebooks,
+- viewing notebook parameter defaults,
+- and downloading the executed output notebook.
 
 ### Notebook execution
 
@@ -42,30 +44,30 @@ The Docker image is defined in `docker/dockerfile`.
 
 ### AWS integration
 
-`lambda/aws_batch.py` connects the API to AWS Batch and S3. It submits jobs, checks their status, and helps find the output notebook after execution.
+`lambda/aws_batch.py` connects the API to AWS Batch and S3. It submits jobs, maps AWS Batch states to simpler API states, lists jobs, and fetches output notebooks after execution.
 
 ## Request flow
 
 This is the basic flow:
 
 1. A client sends a `POST` request for a notebook.
-2. The API checks `paramdump.json` for the notebook and its default parameters.
+2. The API loads `paramdump.json` from S3 and checks the notebook and its default parameters.
 3. If extra parameters are included, they are validated first.
 4. The API submits an AWS Batch job.
 5. The notebook runs inside a container with Papermill.
 6. The output notebook is written to S3.
-7. The client can later check the status or retrieve the output location.
+7. The client can later check the status or download the executed notebook output.
 
 ## API routes
 
 Right now the API has these routes:
 
-- `GET /`
-- `GET /notebook/list`
-- `GET /notebook/{job_id}`
-- `GET /latest-notebook`
-- `GET /notebook/{job_id}/uri`
-- `POST /notebook/{notebook_name}`
+- `POST /jobs/{notebook}`
+- `GET /jobs`
+- `GET /jobs/notebooks`
+- `GET /jobs/notebooks/{name}`
+- `GET /jobs/{job_id}`
+- `GET /jobs/{job_id}/output`
 
 Example body for starting a notebook:
 
@@ -75,12 +77,19 @@ Example body for starting a notebook:
 }
 ```
 
+The API returns simplified job states instead of raw AWS Batch states:
+
+- `queued`
+- `running`
+- `succeeded`
+- `failed`
+
 ## Repository structure
 
 - `app.py` - FastAPI app
+- `pipeline.py` - notebook parameter extraction
 - `lambda/aws_batch.py` - AWS Batch and S3 helper functions
 - `lambda/config.py` - AWS config
-- `api_repo/pipeline.py` - notebook parameter extraction
 - `api_repo/pipeline.sh` - older helper script for notebook conversion
 - `docker/run_from_json.py` - notebook execution script
 - `docker/dockerfile` - Docker image definition
@@ -93,7 +102,7 @@ There are a few things the current code expects:
 - the AWS resources already exist,
 - the S3 bucket is called `notebook2rest`,
 - the AWS region is `eu-west-1`,
-- `paramdump.json` has been generated before the API is used,
+- `paramdump.json` has been generated and uploaded before the API is used,
 - and notebook parameters use the `param_` prefix.
 
 ## Dependencies
@@ -104,8 +113,12 @@ Some of the main dependencies used in this repo are:
 - Uvicorn
 - Papermill
 - nbformat / nbconvert / Jupyter
-- GitPython
 - boto3
+
+The Docker setup also separates common runtime dependencies from notebook-specific dependencies through:
+
+- `docker/requirements.txt`
+- `docker/requirements_notebook.txt`
 
 ## Helper script
 
@@ -114,7 +127,7 @@ Some of the main dependencies used in this repo are:
 Example:
 
 ```bash
-./nb2rest.sh POST /notebook/LiDAR_Vlab_tutorial.ipynb
+./nb2rest.sh GET /jobs
 ```
 
 ## Team
