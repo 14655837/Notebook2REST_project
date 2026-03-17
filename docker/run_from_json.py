@@ -16,7 +16,7 @@ NOTEBOOK_IN = "/app/notebook.ipynb"
 _PARAM_ASSIGN_RE = re.compile(
     r"""^(?P<indent>\s*)
         (?P<name>param_[A-Za-z_]\w*)
-        (?P<ann>\s*:\s*[^=]+)?          # optional type annotation
+        (?P<ann>\s*:\s*[^=]+)?
         \s*=\s*
         (?P<rhs>.*?)
         (?P<comment>\s*\#.*)?$
@@ -26,18 +26,15 @@ _PARAM_ASSIGN_RE = re.compile(
 
 
 def load_payload() -> dict:
-    # 1) JSON passed as first CLI argument OR a path to a json file
     if len(sys.argv) >= 2 and sys.argv[1].strip():
         arg = sys.argv[1].strip()
         if arg.endswith(".json") or os.path.exists(arg):
             return json.loads(Path(arg).read_text(encoding="utf-8-sig"))
         return json.loads(arg)
 
-    # 2) Full payload JSON in env var
     if os.getenv("JOB_JSON"):
         return json.loads(os.environ["JOB_JSON"])
 
-    # 3) AWS Batch style: NOTEBOOK_PARAMS contains just the params dict
     if os.getenv("NOTEBOOK_PARAMS"):
         try:
             params = json.loads(os.environ["NOTEBOOK_PARAMS"])
@@ -46,16 +43,13 @@ def load_payload() -> dict:
 
         payload = {"params": params}
 
-        # output path is best provided by Batch as NOTEBOOK_OUT (S3 or local)
         payload["notebook_out"] = os.getenv("NOTEBOOK_OUT") or "/app/out/run.executed.ipynb"
 
-        # Optional: keep job id around for logging / later use
         if os.getenv("JOB_ID"):
             payload["job_id"] = os.environ["JOB_ID"]
 
         return payload
 
-    # 4) JSON file path (fallback)
     job_file = os.getenv("JOB_JSON_FILE", "/app/job.json")
     return json.loads(Path(job_file).read_text(encoding="utf-8-sig"))
 
@@ -94,7 +88,6 @@ def patch_cell_source(source: str, params: dict) -> tuple[str, int]:
     - Preferred: AST patching (handles multiline RHS safely).
     - Fallback: regex line patching if AST fails (cells with %, !, %% magics).
     """
-    # 1) AST patching
     try:
         tree = ast.parse(source)
         line_offsets = _line_start_offsets(source)
@@ -114,7 +107,6 @@ def patch_cell_source(source: str, params: dict) -> tuple[str, int]:
 
         for n in ast.walk(tree):
             if isinstance(n, ast.Assign):
-                # Patch any assign where at least one target is a param_* we know about.
                 param_targets = [
                     t.id
                     for t in n.targets
@@ -139,7 +131,6 @@ def patch_cell_source(source: str, params: dict) -> tuple[str, int]:
     except SyntaxError:
         pass
 
-    # 2) Regex fallback patching (single-line assignments)
     replaced = 0
 
     def repl(m: re.Match) -> str:
@@ -182,7 +173,6 @@ def main() -> int:
         nbformat.write(nb, str(patched))
 
         cmd = ["papermill", str(patched), notebook_out]
-        # Helpful in Batch logs
         if "job_id" in payload:
             print(f"JOB_ID={payload['job_id']}", flush=True)
 
