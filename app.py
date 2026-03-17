@@ -2,7 +2,7 @@ import json
 from typing import Any, Dict, Optional
 
 from aws_batch import *
-from fastapi import FastAPI, HTTPException, Query, status
+from fastapi import Body, FastAPI, HTTPException, Query, status
 from fastapi.responses import JSONResponse, Response
 from mangum import Mangum
 from pydantic import BaseModel
@@ -10,11 +10,6 @@ from pydantic import BaseModel
 # ============================================================================
 # Pydantic Models
 # ============================================================================
-
-
-class JobCreateRequest(BaseModel):
-    notebook: str
-    params: Optional[Dict[str, Any]] = None
 
 
 class JobResponse(BaseModel):
@@ -201,45 +196,51 @@ def load_paramdump() -> dict:
 
 
 @app.post(
-    "/jobs",
+    "/jobs/{notebook}",
     status_code=202,
     response_model=JobResponse,
     responses={**RESP_NOTEBOOK_NOT_FOUND, **RESP_INVALID_PARAMS, **RESP_INTERNAL},
 )
-def create_job(request: JobCreateRequest):
+def create_job(
+    notebook: str,
+    param_overrides: Optional[Dict[str, Any]] = Body(default=None),
+):
     """
     Create a new job to execute a notebook on AWS Batch.
 
-    Request body:
+    Path parameter:
+    - notebook: notebook name (without .ipynb)
+
+    Optional request body:
     {
-      "notebook": "notebook",
-      "params": { "param_var_x": 10, "param_var_y": 20 }
+      "param_var_x": 10,
+      "param_var_y": 20
     }
     """
     paramdump = load_paramdump()
 
     # Validate notebook name
-    notebook_with_ext = f"{request.notebook}.ipynb"
+    notebook_with_ext = f"{notebook}.ipynb"
     if notebook_with_ext not in paramdump:
-        raise NotebookNotFoundError(request.notebook)
+        raise NotebookNotFoundError(notebook)
 
     # Load defaults for this notebook
     params = paramdump[notebook_with_ext].copy()
 
     # Validate and merge user-provided parameters
-    if request.params:
-        invalid_keys = [k for k in request.params.keys() if k not in params]
+    if param_overrides:
+        invalid_keys = [k for k in param_overrides.keys() if k not in params]
         if invalid_keys:
             raise InvalidParamsError(invalid_keys, list(params.keys()))
-        params.update(request.params)
+        params.update(param_overrides)
 
     # Submit the job
     try:
-        job_id = start_job(request.notebook, params)
+        job_id = start_job(notebook, params)
     except Exception as e:
         raise InternalServerError(f"Failed to submit job: {str(e)}")
 
-    job_response = JobResponse(id=job_id, notebook=request.notebook, status="queued")
+    job_response = JobResponse(id=job_id, notebook=notebook, status="queued")
     return JSONResponse(
         status_code=202,
         content=job_response.model_dump(),
