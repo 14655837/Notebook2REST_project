@@ -1,13 +1,6 @@
 name: containerise notebooks
 on:
   workflow_call:
-    inputs:
-      base_sha:
-        required: true
-        type: string
-      head_sha:
-        required: true
-        type: string
 
 permissions:
   id-token: write
@@ -60,7 +53,7 @@ jobs:
         id: detect
         shell: bash
         run: |
-          CHANGED_FILES="$(git diff --name-only '${{ inputs.base_sha }}' '${{ inputs.head_sha }}')"
+          CHANGED_FILES="$(git diff --name-only '${{ github.event.before }}' '${{ github.sha }}')"
 
           NOTEBOOKS="$(
             {
