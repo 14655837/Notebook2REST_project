@@ -75,8 +75,7 @@ jobs:
           [ -f external_repo_sha.txt ] && PREVIOUS_EXTERNAL_SHA="$(cat external_repo_sha.txt)" || PREVIOUS_EXTERNAL_SHA=""
 
           if echo "$CHANGED_FILES" | grep -Eq '^\.github/batch/job-definition-template\.json$' || \
-             [ -z "$PREVIOUS_EXTERNAL_SHA" ] || \
-             [ "$CURRENT_EXTERNAL_SHA" != "$PREVIOUS_EXTERNAL_SHA" ]; then
+            { [ -n "$PREVIOUS_EXTERNAL_SHA" ] && [ "$CURRENT_EXTERNAL_SHA" != "$PREVIOUS_EXTERNAL_SHA" ]; }; then
             NOTEBOOKS="$(find . -maxdepth 1 -name '*.ipynb' -printf '%f\n' | sed 's/\.ipynb$//' | sort -u)"
           else
             NOTEBOOKS="$(
@@ -87,6 +86,7 @@ jobs:
                 [ -f "${nb}.ipynb" ] && echo "$nb"
               done
             )"
+
           fi
 
           TOTAL_CHANGED=$(printf '%s\n' "$NOTEBOOKS" | sed '/^$/d' | wc -l)
