@@ -6,6 +6,9 @@ from fastapi import Body, FastAPI, HTTPException, Query, status
 from fastapi.responses import JSONResponse, Response
 from mangum import Mangum
 from pydantic import BaseModel
+import boto3
+
+s3 = boto3.client("s3")
 
 # ============================================================================
 # Pydantic Models
@@ -183,11 +186,8 @@ def load_paramdump() -> dict:
     Raises:
         InternalServerError: If paramdump.json cannot be loaded.
     """
-    try:
-        with open("paramdump.json", "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        raise InternalServerError("Could not load notebook definitions.")
+    obj = s3.get_object(Bucket="notebook2rest", Key="paramdump.json")
+    return json.loads(obj["Body"].read())
 
 
 # ============================================================================
