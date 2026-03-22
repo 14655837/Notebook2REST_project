@@ -93,7 +93,6 @@ The API returns simplified job states instead of raw AWS Batch states:
 - `api_repo/pipeline.sh` - older helper script for notebook conversion
 - `docker/run_from_json.py` - notebook execution script
 - `docker/dockerfile` - Docker image definition
-- `nb2rest.sh` - helper script to invoke the Lambda function
 
 ## Important assumptions
 
@@ -119,16 +118,6 @@ The Docker setup also separates common runtime dependencies from notebook-specif
 
 - `docker/requirements.txt`
 - `docker/requirements_notebook.txt`
-
-## Helper script
-
-`nb2rest.sh` can be used to call the deployed Lambda function with a simulated API Gateway event.
-
-Example:
-
-```bash
-./nb2rest.sh GET /jobs
-```
 
 ## Team
 
